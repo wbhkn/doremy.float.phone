@@ -685,12 +685,13 @@ export const DEFAULT_NOVELAI_PRESET: import("./settings-types").NovelAiPreset = 
 };
 
 export const DEFAULT_IMAGE_GENERATION_SETTINGS: ImageGenerationSettings = {
-    enabled: false,
+    // 自部署默认接到本机的 ComfyUI 桥接（经 Supabase Edge Function 固定反代），开箱即用。
+    enabled: true,
     provider: "openai",
     requestMode: "direct",
-    apiKey: "",
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-image-2",
+    apiKey: "comfyui",
+    baseUrl: "https://uaolzgbiuywqxbalofgm.supabase.co/functions/v1/comfy-proxy/v1",
+    model: "z-image-turbo",
     size: "1024x1024",
     quality: "auto",
     extraPrompt: "",
