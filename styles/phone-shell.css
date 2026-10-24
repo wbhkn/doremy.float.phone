@@ -1458,3 +1458,44 @@
 .folder-dots .dot.active {
   background: color-mix(in srgb, var(--c-home-label, #ffffff) 85%, transparent);
 }
+
+/* ── 矮屏适配（如 360×640 / 华为 Mate 10、系统显示大小调大后的视口） ──
+   桌面 6 行格子由剩余高度均分，矮屏上每行只剩 ~60px，而 .icon-item 固定
+   min-height: 84px，标签会被顶到下一行图标底下（文字被吃掉）。
+   这里改为：① 收回底部留白 ② 行距收紧 ③ 图标尺寸按可用行高实时算，
+   图标+标签始终待在各自格子里；高屏（≥780px）不受影响。 */
+@media (max-height: 780px) and (hover: none) and (pointer: coarse) {
+  :root {
+    --home-grid-bottom-trim: 8px;
+    --home-row-gap-y: 2px;
+  }
+
+  .icon-grid,
+  .dock {
+    /* 行高 ≈ (视口高 - 顶部 78 - 底部坞 132 - 留白 8 - 行距 10) / 6；
+       减掉图标与标签之间的 4px + 文字约 12px，剩下就是图标能占的高度。 */
+    --fit-glyph: clamp(34px, calc((100vh - 228px) / 6 - 16px), 58px);
+    --slot-icon-width: var(--fit-glyph);
+    --slot-icon-height: var(--fit-glyph);
+  }
+
+  .icon-glyph-box,
+  .dock .dock-glyph-box {
+    width: var(--fit-glyph, 58px);
+    height: var(--fit-glyph, 58px);
+    border-radius: min(16px, calc(var(--fit-glyph, 58px) * 0.28));
+  }
+
+  .icon-item {
+    min-height: 0;
+    gap: 4px;
+  }
+
+  .icon-label {
+    font-size: calc(9.6px * var(--app-text-scale, 1));
+  }
+
+  .dock {
+    min-height: max(64px, calc(var(--fit-glyph, 58px) + 26px));
+  }
+}
