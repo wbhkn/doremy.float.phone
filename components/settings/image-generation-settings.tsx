@@ -351,7 +351,12 @@ export function ImageGenerationSettings() {
             if (!result) throw new Error("图像生成未返回结果。");
             if (testPreviewUrl) URL.revokeObjectURL(testPreviewUrl);
             setTestPreviewUrl(URL.createObjectURL(result.blob));
-            setStatus({ success: true, message: "测试生图成功。" });
+            setStatus({
+                success: true,
+                message: settings.enabled
+                    ? "测试生图成功。"
+                    : "测试生图成功——但顶部「启用自动生图」还关着，角色/栖所/小卷都不会真正调用，去把它打开。",
+            });
         } catch (err) {
             setStatus({ success: false, message: err instanceof Error ? err.message : String(err) });
         } finally {
@@ -498,6 +503,16 @@ export function ImageGenerationSettings() {
                         <Toggle checked={settings.enabled} onChange={(enabled) => updateSettings({ enabled })} className="settings-toggle-control" />
                     </span>
                 </div>
+                {!settings.enabled && (
+                    <div className="menu-item">
+                        <Alert variant="danger">
+                            <AlertCircle size={16} className="mt-[2px] shrink-0" />
+                            <span className="break-all leading-[1.5]">
+                                这个开关是<b>总闸</b>：关着的时候「测试生图」能成功，但角色发照片、栖所房间图、小卷生成图片都不会真正调用接口（一律按「生图未开启」处理）。
+                            </span>
+                        </Alert>
+                    </div>
+                )}
             </div>
 
             <div className="menu-group p-4 flex flex-col gap-4">
@@ -812,6 +827,11 @@ export function ImageGenerationSettings() {
                                 onChange={(event) => updateOpenAiPreset({ apiKey: event.target.value })}
                                 placeholder="sk-..."
                             />
+                            {!activeOpenAiPreset.apiKey.trim() && (
+                                <p className="menu-desc ml-1 opacity-70">
+                                    必填。自部署的 ComfyUI 代理要填 <b>bridge token</b>（不是 sk- 开头的 key）；留空时所有功能都会提示「请先在设置中配置生图」。
+                                </p>
+                            )}
                         </div>
 
                         <div className="flex flex-col gap-1">
