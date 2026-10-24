@@ -689,7 +689,8 @@ export const DEFAULT_IMAGE_GENERATION_SETTINGS: ImageGenerationSettings = {
     enabled: true,
     provider: "openai",
     requestMode: "direct",
-    apiKey: "comfyui",
+    // 自部署的 comfy-proxy 需要 bridge token；留空让用户自己贴（写成固定值等于把令牌公开在仓库里）
+    apiKey: "",
     baseUrl: "https://uaolzgbiuywqxbalofgm.supabase.co/functions/v1/comfy-proxy/v1",
     model: "z-image-turbo",
     size: "1024x1024",
@@ -801,7 +802,13 @@ function normalizeImageGenerationSettings(settings: Partial<ImageGenerationSetti
         && openaiPresets.some(preset => preset.id === settings.activeOpenAiPresetId)
         ? settings.activeOpenAiPresetId
         : openaiPresets[0].id;
-    const activeOpenAiPreset = openaiPresets.find(preset => preset.id === activeOpenAiPresetId) || openaiPresets[0];
+    // 旧默认值把占位符 "comfyui" 写进了 apiKey —— 它不是有效令牌（代理会回 401），迁移成空串让用户重填。
+    // 见 lib/image-generation-service.ts 的 Authorization 头用法。
+    const LEGACY_PLACEHOLDER_API_KEY = "comfyui";
+    const safeOpenAiPresets = openaiPresets.map(preset => preset.apiKey === LEGACY_PLACEHOLDER_API_KEY
+        ? { ...preset, apiKey: "" }
+        : preset);
+    const activeSafePreset = safeOpenAiPresets.find(preset => preset.id === activeOpenAiPresetId) || safeOpenAiPresets[0];
 
     const rawNai = settings?.novelai;
     let naiPresets = Array.isArray(rawNai?.presets) && rawNai.presets.length > 0
@@ -825,14 +832,14 @@ function normalizeImageGenerationSettings(settings: Partial<ImageGenerationSetti
         ...DEFAULT_IMAGE_GENERATION_SETTINGS,
         ...(settings || {}),
         provider,
-        requestMode: activeOpenAiPreset.requestMode,
-        apiKey: activeOpenAiPreset.apiKey,
-        baseUrl: activeOpenAiPreset.baseUrl,
-        model: activeOpenAiPreset.model,
-        size: activeOpenAiPreset.size,
-        quality: activeOpenAiPreset.quality,
-        extraPrompt: activeOpenAiPreset.extraPrompt,
-        openaiPresets,
+        requestMode: activeSafePreset.requestMode,
+        apiKey: activeSafePreset.apiKey,
+        baseUrl: activeSafePreset.baseUrl,
+        model: activeSafePreset.model,
+        size: activeSafePreset.size,
+        quality: activeSafePreset.quality,
+        extraPrompt: activeSafePreset.extraPrompt,
+        openaiPresets: safeOpenAiPresets,
         activeOpenAiPresetId,
         novelai,
         characterReferences: refs,
