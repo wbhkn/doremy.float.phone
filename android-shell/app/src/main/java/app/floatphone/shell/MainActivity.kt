@@ -22,6 +22,7 @@ import android.provider.Settings
 import android.util.Base64
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import android.webkit.CookieManager
@@ -55,7 +56,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         val SITE_URL: String = BuildConfig.SITE_URL
-        const val VERSION = "1.0.10"
+        const val VERSION = "1.0.14"
         /** 来电接听等场景的站内深链（必须以 SITE_URL 开头，否则忽略） */
         const val EXTRA_OPEN_URL = "open_url"
         /** 外部 App（如桌宠）唤起本壳用的自定义 scheme：floatshell://open?url=<站内地址> */
@@ -66,6 +67,83 @@ class MainActivity : AppCompatActivity() {
          * 只需要管一个开关。渠道一旦创建过，后建的只更新名称/描述，不会重置用户选择。
          */
         const val CH_MESSAGES = "shell_messages"
+
+        /**
+         * 注入到每个页面的 Notification 补齐脚本（polyfill）。
+         *
+         * WebView 没有实现 Web Notification：`typeof Notification === "undefined"`。
+         * 结果是两个具体的毛病：
+         *   1. 页面里的设备体检会显示「通知权限：不支持」，让人以为推送坏了；
+         *   2. 自定义小应用/内嵌网页里写 `new Notification(...)` 会直接抛错或静默失败。
+         * 这里把标准接口映射到原生桥 AndroidShell.notify，permission 读系统开关，
+         * requestPermission 触发原生申请，ServiceWorkerRegistration.showNotification
+         * 也一并代理——这样「网页以为的能力」和「壳的真实能力」就一致了。
+         *
+         * 幂等：靠 window.__floatNotifPolyfill 标记，onPageStarted/onPageFinished 各注入一次。
+         */
+        private val NOTIF_POLYFILL_JS = """
+            (function () {
+              if (window.__floatNotifPolyfill) return;
+              window.__floatNotifPolyfill = true;
+              var bridge = window.AndroidShell;
+              function enabled() {
+                try {
+                  if (bridge && typeof bridge.notificationsEnabled === "function") return !!bridge.notificationsEnabled();
+                } catch (e) {}
+                return true;
+              }
+              function post(title, opts) {
+                opts = opts || {};
+                try {
+                  if (bridge && typeof bridge.notify === "function") {
+                    bridge.notify(
+                      String(title == null ? "" : title),
+                      String(opts.body == null ? "" : opts.body),
+                      String(opts.icon == null ? "" : opts.icon),
+                      ""
+                    );
+                  }
+                } catch (e) {}
+              }
+              function FloatNotification(title, opts) {
+                opts = opts || {};
+                this.title = String(title == null ? "" : title);
+                this.body = String(opts.body == null ? "" : opts.body);
+                this.tag = String(opts.tag == null ? "" : opts.tag);
+                this.onclick = null;
+                this.onclose = null;
+                this.onerror = null;
+                this.close = function () {};
+                post(this.title, opts);
+              }
+              FloatNotification.prototype.addEventListener = function () {};
+              FloatNotification.prototype.removeEventListener = function () {};
+              FloatNotification.maxActions = 0;
+              try {
+                Object.defineProperty(FloatNotification, "permission", {
+                  get: function () { return enabled() ? "granted" : "denied"; },
+                  configurable: true
+                });
+              } catch (e) { FloatNotification.permission = "granted"; }
+              FloatNotification.requestPermission = function (callback) {
+                var result = enabled() ? "granted" : "denied";
+                try { if (typeof callback === "function") callback(result); } catch (e) {}
+                return Promise.resolve(result);
+              };
+              try { window.Notification = FloatNotification; } catch (e) {}
+              try {
+                var swProto = window.ServiceWorkerRegistration && ServiceWorkerRegistration.prototype;
+                if (swProto) {
+                  if (!swProto.showNotification) {
+                    swProto.showNotification = function (title, opts) { post(title, opts); return Promise.resolve(); };
+                  }
+                  if (!swProto.getNotifications) {
+                    swProto.getNotifications = function () { return Promise.resolve([]); };
+                  }
+                }
+              } catch (e) {}
+            })();
+        """.trimIndent()
     }
 
     private lateinit var rootContainer: FrameLayout
@@ -300,7 +378,24 @@ class MainActivity : AppCompatActivity() {
         // WebView 只能在主线程访问，投递时由 ShellBus 统一 post 到主线程。
         ShellBus.webView = webView
 
+        /** 把 Notification polyfill 打进当前文档（幂等，见 NOTIF_POLYFILL_JS）。 */
+        private fun injectNotificationPolyfill() {
+            runCatching { webView.evaluateJavascript(NOTIF_POLYFILL_JS, null) }
+        }
+
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                injectNotificationPolyfill()
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // 二次注入是兜底：onPageStarted 时新文档还未必可执行 JS，
+                // 有些站点（含本站的 App Router）会在首帧就检查 Notification。
+                injectNotificationPolyfill()
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
                 val scheme = url.scheme ?: return false
@@ -552,6 +647,19 @@ class MainActivity : AppCompatActivity() {
     inner class ShellBridge {
         @JavascriptInterface
         fun getVersion(): String = VERSION
+
+        /**
+         * 系统层面「本站通知」是否被允许。
+         *
+         * 和网页自带的 Notification.permission 不同：这里的判定口径是系统的
+         * NotificationManager，既覆盖 Android 13+ 的 POST_NOTIFICATIONS 运行时授权，
+         * 也覆盖用户在该 App 的系统通知设置里关掉总开关的情况。
+         * Notification polyfill 的 permission/requestPermission 都以它为准。
+         */
+        @JavascriptInterface
+        fun notificationsEnabled(): Boolean =
+            runCatching { NotificationManagerCompat.from(this@MainActivity).areNotificationsEnabled() }
+                .getOrDefault(true)
 
         /** 实测系统状态栏高度（CSS px）。页面侧兜底轮询用；主要注入路径见 injectStatusBarHeight。 */
         @JavascriptInterface
