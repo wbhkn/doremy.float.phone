@@ -378,11 +378,6 @@ class MainActivity : AppCompatActivity() {
         // WebView 只能在主线程访问，投递时由 ShellBus 统一 post 到主线程。
         ShellBus.webView = webView
 
-        /** 把 Notification polyfill 打进当前文档（幂等，见 NOTIF_POLYFILL_JS）。 */
-        private fun injectNotificationPolyfill() {
-            runCatching { webView.evaluateJavascript(NOTIF_POLYFILL_JS, null) }
-        }
-
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
@@ -641,6 +636,11 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().flush()
         webView.destroy()
         super.onDestroy()
+    }
+
+    /** 把 Notification polyfill 打进当前文档（幂等，见 NOTIF_POLYFILL_JS）。 */
+    private fun injectNotificationPolyfill() {
+        runCatching { webView.evaluateJavascript(NOTIF_POLYFILL_JS, null) }
     }
 
     /** 暴露给网页的原生桥（网页侧可用 window.AndroidShell 特性检测壳环境）。 */
