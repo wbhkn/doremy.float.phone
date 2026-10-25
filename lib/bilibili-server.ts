@@ -26,6 +26,25 @@ const MIXIN_KEY_ENC_TAB = [
 
 const TIMEOUT_MS = 12_000;
 
+/**
+ * B 站按 IP 做频控：同一接口连发几次就会 412「request was banned」，
+ * 冷却 1~2 分钟才恢复。所以这里自己排队，任意两次出站请求至少隔 1.5 秒。
+ */
+const MIN_GAP_MS = 1_500;
+let lastRequestAt = 0;
+let queue: Promise<unknown> = Promise.resolve();
+
+function schedule<T>(task: () => Promise<T>): Promise<T> {
+    const run = queue.then(async () => {
+        const wait = MIN_GAP_MS - (Date.now() - lastRequestAt);
+        if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+        lastRequestAt = Date.now();
+        return task();
+    });
+    queue = run.catch(() => undefined);
+    return run;
+}
+
 export type BiliActionResult =
     | ({ ok: true; action: string } & Record<string, unknown>)
     | { ok: false; action: string; reason: string; message: string; status?: number };
@@ -36,6 +55,7 @@ const WBI_TTL = 10 * 60 * 1000;
 type CacheEntry = { at: number; payload: BiliActionResult };
 const responseCache = new Map<string, CacheEntry>();
 const CACHE_TTL: Record<string, number> = {
+    feed: 45_000,
     popular: 120_000,
     ranking: 300_000,
     search: 60_000,
@@ -50,7 +70,14 @@ function md5(input: string): string {
     return createHash("md5").update(input).digest("hex");
 }
 
-async function biliJson(url: string): Promise<{ status: number; json: Record<string, unknown> }> {
+class BiliRiskControlError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "BiliRiskControlError";
+    }
+}
+
+async function requestJson(url: string): Promise<{ status: number; json: Record<string, unknown> }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
@@ -60,6 +87,9 @@ async function biliJson(url: string): Promise<{ status: number; json: Record<str
             signal: controller.signal,
         });
         const text = await res.text();
+        if (res.status === 412 || res.status === 429) {
+            throw new BiliRiskControlError(`B 站按频率拦了这次请求（HTTP ${res.status}）`);
+        }
         let json: Record<string, unknown> | null = null;
         try {
             json = JSON.parse(text) as Record<string, unknown>;
@@ -70,6 +100,11 @@ async function biliJson(url: string): Promise<{ status: number; json: Record<str
     } finally {
         clearTimeout(timer);
     }
+}
+
+/** 所有出站请求都排队，保证 1.5s 间隔 */
+async function biliJson(url: string): Promise<{ status: number; json: Record<string, unknown> }> {
+    return schedule(() => requestJson(url));
 }
 
 function keyFromUrl(url: string): string {
@@ -159,6 +194,40 @@ async function fetchViewRaw(bvid: string): Promise<Record<string, unknown>> {
     const code = num(json.code);
     if (code !== 0) throw new Error(`视频详情拿不到（code ${code}）`);
     return (json.data || {}) as Record<string, unknown>;
+}
+
+async function actionFeed(query: Record<string, string>): Promise<BiliActionResult> {
+    const ps = Math.min(Math.max(num(query.ps) || 6, 1), 20);
+    const freshIdx = Math.max(num(query.fresh_idx) || 1, 1);
+    const url =
+        "https://api.bilibili.com/x/web-interface/wbi/index/top/feed/rcmd" +
+        `?ps=${ps}&fresh_type=4&fresh_idx=${freshIdx}&fresh_idx_1h=${freshIdx}`;
+    const { json } = await biliJson(url);
+    const code = num(json.code);
+    if (code !== 0) return riskControl("feed", code);
+    const data = (json.data || {}) as Record<string, unknown>;
+    const list = (data.item || data.items || []) as Record<string, unknown>[];
+    return {
+        ok: true,
+        action: "feed",
+        freshIdx,
+        items: list.map(item => {
+            const owner = (item.owner || {}) as Record<string, unknown>;
+            const stat = (item.stat || {}) as Record<string, unknown>;
+            const bvid = String(item.bvid || "");
+            return {
+                bvid,
+                title: trim(stripHtml(item.title), 90),
+                up: trim(owner.name, 30),
+                view: num(stat.view),
+                like: num(stat.like),
+                danmaku: num(stat.danmaku),
+                duration: formatDuration(num(item.duration)),
+                link: bvid ? `https://www.bilibili.com/video/${bvid}` : "",
+                desc: trim(stripHtml(item.desc), 90),
+            };
+        }),
+    };
 }
 
 async function actionPopular(query: Record<string, string>): Promise<BiliActionResult> {
@@ -267,7 +336,8 @@ async function actionComments(query: Record<string, string>): Promise<BiliAction
     }
     if (!aid) return { ok: false, action: "comments", reason: "bad_request", message: "缺少 bvid 或 aid" };
     const { json } = await biliJson(
-        `https://api.bilibili.com/x/v2/reply?type=1&oid=${aid}&sort=2&ps=12&pn=1`,
+        // nohot=1 是关键：不带它 B 站会走「热评」模式，直接静默返回空列表。
+        `https://api.bilibili.com/x/v2/reply?type=1&oid=${aid}&sort=2&nohot=1&ps=20&pn=1`,
     );
     const code = num(json.code);
     if (code !== 0) return riskControl("comments", code);
@@ -359,7 +429,7 @@ async function actionUser(query: Record<string, string>): Promise<BiliActionResu
     return result;
 }
 
-const ACTIONS = ["popular", "ranking", "search", "video", "comments", "related", "online", "user"] as const;
+const ACTIONS = ["feed", "popular", "ranking", "search", "video", "comments", "related", "online", "user"] as const;
 
 /** 统一入口：把「我们自己定义的动作名」翻译成 B 站接口调用 */
 export async function runBiliAction(action: string, query: Record<string, string> = {}): Promise<BiliActionResult> {
@@ -381,6 +451,9 @@ export async function runBiliAction(action: string, query: Record<string, string
     let payload: BiliActionResult;
     try {
         switch (key) {
+            case "feed":
+                payload = await actionFeed(query);
+                break;
             case "popular":
                 payload = await actionPopular(query);
                 break;
@@ -409,13 +482,22 @@ export async function runBiliAction(action: string, query: Record<string, string
                 payload = { ok: false, action: key, reason: "unknown_action", message: "动作不可用" };
         }
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        payload = {
-            ok: false,
-            action: key,
-            reason: "upstream_unreachable",
-            message: `没能连上 B 站：${trim(message, 160)}`,
-        };
+        if (error instanceof BiliRiskControlError) {
+            payload = {
+                ok: false,
+                action: key,
+                reason: "risk_control",
+                message: "B 站按频率拦了这次请求，隔一两分钟再试，别连着重试",
+            };
+        } else {
+            const message = error instanceof Error ? error.message : String(error);
+            payload = {
+                ok: false,
+                action: key,
+                reason: "upstream_unreachable",
+                message: `没能连上 B 站：${trim(message, 160)}`,
+            };
+        }
     }
 
     if (payload.ok) responseCache.set(cacheKey, { at: Date.now(), payload });

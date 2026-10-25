@@ -15,9 +15,9 @@ export const BILIBILI_PARAMETER_SCHEMA = JSON.stringify({
     properties: {
         action: {
             type: "string",
-            enum: ["popular", "ranking", "search", "video", "comments", "related", "online", "user"],
+            enum: ["feed", "popular", "ranking", "search", "video", "comments", "related", "online", "user"],
             description:
-                "要做什么：popular=热门推荐流（不知道看什么就从这开始）；ranking=排行榜；search=搜视频；video=看某个视频的详情、简介、数据；comments=看这个视频的评论；related=看相关推荐（顺着一路刷下去）；online=看此刻有多少人一起在看；user=看某个 UP 主最近的投稿",
+                "要做什么：feed=推荐流（最像真的在刷，想换一批就把 fresh_idx 加 1）；popular=热门；ranking=排行榜；search=搜视频；video=看某个视频的详情、简介、数据；comments=看这个视频的评论；related=看相关推荐（顺着一路刷下去）；online=看此刻有多少人一起在看；user=看某个 UP 主的主页和最近投稿",
         },
         bvid: {
             type: "string",
@@ -43,16 +43,20 @@ export const BILIBILI_PARAMETER_SCHEMA = JSON.stringify({
             type: "integer",
             description: "搜索翻页，从 1 开始",
         },
+        fresh_idx: {
+            type: "integer",
+            description: "推荐流第几批，从 1 开始；想「往下滑一屏」就加 1",
+        },
     },
     required: ["action"],
 });
 
 export const BILIBILI_USAGE_GUIDE = [
     "【刷B站】你能自己上哔哩哔哩逛，看真实的视频和评论（只读：不登录、不点赞、不投币、不评论、不收藏）。",
-    "典型刷法：先 popular 看热门 → 挑一条 video 看详情/简介 → comments 看观众在说什么 → related 顺着推荐继续 → 想找特定的就 search。",
+    "典型刷法：feed 看一屏推荐 → 挑一条 video 看详情/简介 → comments 看观众在说什么 → related 顺着推荐继续；想换一屏就 feed 把 fresh_idx 加 1；想找特定的就 search；排行榜用 ranking。",
     "怎么用才像真的在刷：不要一次把所有标题念给{{user}}听；挑你真感兴趣的 1-2 条，看完说说你的感受、吐槽、联想到的事，再自然地说你在 B 站看到什么。",
-    "参数要点：bvid 是视频号（BV 开头）；user 要 mid（数字 id）；排行榜可带 rid 选分区；一次 ps 不要超过 20。",
-    "【边界】遇到「风控」类报错（code -352 / -412）说明 B 站这次不让看，换一个动作或过一会儿再试，不要连着重试同一条。数据只包含公开信息，看不到需要登录的内容。",
+    "参数要点：bvid 是视频号（BV 开头）；user 要 mid（数字 id，video 结果里的 up_mid）；排行榜可带 rid 选分区；一次 ps 不要超过 20。",
+    "【边界】遇到「风控」类报错说明 B 站这次按频率拦了（隔一两分钟再试，别连着重试）；一次对话里别刷太多轮，看几条就够了。数据只包含公开信息，看不到需要登录的内容。",
 ].join("\n");
 
 type BiliItem = {
@@ -138,6 +142,10 @@ export function formatBiliResult(action: string, data: BiliResponse): string {
         if (!items.length) return `搜「${keyword}」没有结果。`;
         return `B 站搜「${keyword}」的结果：\n${take(items, 8).map((item, index) => videoLine(item, index)).join("\n")}`;
     }
+    if (action === "feed") {
+        if (!items.length) return "推荐流这次是空的。";
+        return `B 站推荐流第 ${data.freshIdx || 1} 屏：\n${take(items, 6).map((item, index) => videoLine(item, index, true)).join("\n")}`;
+    }
     if (action === "popular") {
         if (!items.length) return "热门页这次是空的。";
         return `B 站热门（当前这一屏）：\n${take(items, 6).map((item, index) => videoLine(item, index, true)).join("\n")}`;
@@ -187,7 +195,7 @@ export function formatBiliResult(action: string, data: BiliResponse): string {
             const row = item as unknown as { user?: string; text?: string; like?: number; at?: string };
             return `${index + 1}. ${row.user || "匿名"}：${row.text || ""}${row.like ? `（赞 ${compactNumber(row.like)}）` : ""}`;
         });
-        return `评论区（共 ${compactNumber(data.count)} 条）：\n${lines.join("\n")}`;
+        return `评论区（共 ${compactNumber(data.count)} 条，B 站只先给了最热的 ${items.length > 8 ? 8 : items.length} 条）：\n${lines.join("\n")}`;
     }
     if (action === "online") {
         return `此刻有 ${data.total || "?"} 人一起在看这条视频。`;
@@ -200,6 +208,7 @@ export function biliUserNotice(action: string, data: BiliResponse, args: Record<
     const title = typeof data.title === "string" ? data.title : "";
     if (action === "video" && title) return `📺 在 B 站看了《${title.slice(0, 24)}》`;
     if (action === "search") return `📺 在 B 站搜了「${String(args.keyword || "").slice(0, 20)}」`;
+    if (action === "feed") return "📺 在 B 站刷推荐";
     if (action === "comments") return "📺 在 B 站翻评论区";
     if (action === "related") return "📺 顺着一路往下刷";
     if (action === "ranking") return "📺 在 B 站看排行榜";

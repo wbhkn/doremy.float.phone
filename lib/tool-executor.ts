@@ -2624,7 +2624,10 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
     const params: Record<string, string | number> = {};
     const bvid = String(args.bvid ?? "").trim();
 
-    if (action === "popular") {
+    if (action === "feed") {
+        if (Number(args.ps)) params.ps = Math.min(Math.max(Number(args.ps), 1), 20);
+        if (Number(args.fresh_idx)) params.fresh_idx = Math.max(Number(args.fresh_idx), 1);
+    } else if (action === "popular") {
         if (Number(args.ps)) params.ps = Math.min(Math.max(Number(args.ps), 1), 20);
     } else if (action === "ranking") {
         if (args.rid !== undefined) params.rid = Number(args.rid) || 0;
@@ -2642,7 +2645,7 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
         if (!mid) return failed("看 UP 主主页需要 mid（视频详情里的 up_mid）");
         params.mid = mid;
     } else {
-        return failed("action 只能是 popular / ranking / search / video / comments / related / online / user");
+        return failed("action 只能是 feed / popular / ranking / search / video / comments / related / online / user");
     }
 
     const response = await biliApiCall(action, params);
