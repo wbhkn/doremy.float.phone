@@ -71,8 +71,29 @@ export function ScreenshotDiagnosticsPanel({ onNotice }: { onNotice?: (msg: stri
 
   const shotRows: Row[] = shot
     ? [
-        { label: "系统支持", value: shot.supported ? "支持（Android 11+）" : "不支持（需 Android 11+）", tone: toneOf(shot.supported) },
-        { label: "无障碍服务", value: shot.accessibilityOn ? "已开启" : "未开启（截屏的前提）", tone: toneOf(shot.accessibilityOn) },
+        // 老机型（如 Android 10）走的是系统授权截屏，不是无障碍；这里必须按
+        // 实际通道说话，否则一句「支持（Android 11+）」会让人以为还得换手机。
+        {
+          label: "系统支持",
+          value: shot.supported
+            ? (shot.mode === "projection" ? "支持：系统授权截屏（Android 10 也能用）" : "支持：无障碍直取")
+            : "不支持：没有可用的截屏通道",
+          tone: toneOf(shot.supported),
+        },
+        {
+          label: "截屏通道",
+          value: shot.mode === "projection"
+            ? "系统授权框：每次点「看一眼屏幕」弹一次，点「立即开始」才截一张"
+            : shot.mode === "accessibility" ? "无障碍直取：不弹框" : "没有可用的通道",
+          tone: shot.mode === "projection" || shot.mode === "accessibility" ? "ok" : "bad",
+        },
+        {
+          label: "无障碍服务",
+          value: shot.mode === "projection"
+            ? "不需要（本机走系统授权框）"
+            : shot.accessibilityOn ? "已开启" : "未开启（截屏的前提）",
+          tone: shot.mode === "projection" ? "ok" : toneOf(shot.accessibilityOn),
+        },
         { label: "当前可截", value: shot.ready ? "可以" : "不可以", tone: toneOf(shot.ready) },
         { label: "进行中", value: shot.capturing ? "有一张还没截完" : "空闲", tone: shot.capturing ? "warn" : "ok" },
         { label: "累计截屏", value: `${shot.captureCount ?? 0} 次`, tone: "ok" },

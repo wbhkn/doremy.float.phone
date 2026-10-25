@@ -43,6 +43,23 @@ const nextConfig = {
   outputFileTracingIncludes: {
     "/api/**": ["./data/**"],
   },
+  async headers() {
+    return [
+      {
+        // 部署平台默认给 /_next/static/ 一年 immutable，而 App Router 的
+        // page chunk 文件名跨部署不变 —— 不覆盖的话，装过旧版的手机哪怕
+        // 升级了 APK、站点也发了新版，WebView 仍会一直跑旧 JS。
+        // 改成协商缓存：内容没变时 304，代价很小，换的是「升级一定能生效」。
+        source: "/_next/static/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }],
+      },
+      {
+        // Service Worker 脚本必须每次能拿到最新的（它自己再控制其余缓存）
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }],
+      },
+    ];
+  },
   webpack: (config, { isServer, webpack }) => {
     if (!isServer) {
       // @gltf-transform/core 的 dist 引用 node:fs / node:path(带 node: 前缀),

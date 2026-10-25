@@ -20,6 +20,7 @@ import {
     loadInternalCapabilities,
     saveInternalCapabilities,
 } from "@/lib/internal-capability-storage";
+import { openExternalUrl } from "@/lib/open-external";
 
 export function AgentComputerSettings({ onNotice }: { onNotice?: (msg: string) => void }) {
     const [config, setConfig] = useState(() => loadAgentComputerConfig());
@@ -110,7 +111,7 @@ export function AgentComputerSettings({ onNotice }: { onNotice?: (msg: string) =
                     <button
                         type="button"
                         className="ui-btn ui-btn-primary w-full justify-center"
-                        onClick={() => window.open(containerDeploy ? AGENT_COMPUTER_CONTAINER_DEPLOY_URL : AGENT_COMPUTER_DEPLOY_URL, "_blank", "noopener")}
+                        onClick={() => openExternalUrl(containerDeploy ? AGENT_COMPUTER_CONTAINER_DEPLOY_URL : AGENT_COMPUTER_DEPLOY_URL)}
                     >
                         <Rocket size={16} /> {containerDeploy ? "一键部署（容器版）到 Cloudflare" : "一键部署到 Cloudflare"}
                     </button>
@@ -122,7 +123,7 @@ export function AgentComputerSettings({ onNotice }: { onNotice?: (msg: string) =
                     <button
                         type="button"
                         className="menu-desc !mt-0 text-center underline bg-transparent border-none cursor-pointer"
-                        onClick={() => window.open("https://github.com/xiaolongbao0709/agent-computer#部署按钮失败--想删掉重新部署", "_blank", "noopener")}
+                        onClick={() => openExternalUrl("https://github.com/xiaolongbao0709/agent-computer#部署按钮失败--想删掉重新部署")}
                     >
                         一键部署失败？这里有另一条路
                     </button>

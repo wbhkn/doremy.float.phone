@@ -271,12 +271,18 @@ export function PerceptionSettings({ onNotice }: { onNotice?: (msg: string) => v
                           <div className="per-cap-name">{row.label}</div>
                           <div className="per-cap-desc">{row.desc}</div>
                           <div className="per-tags">
-                            <span className="per-tag" data-tone={row.userEnabled ? "ok" : "off"}>
-                              {row.userEnabled ? "已开启" : "已关闭"}
-                            </span>
-                            <span className="per-tag" data-tone={row.nativeSupported ? "ok" : "off"}>
-                              {row.nativeSupported ? "App 已支持" : "当前版本不支持"}
-                            </span>
+                            {row.nativeSupported ? (
+                              <span className="per-tag" data-tone={row.userEnabled ? "ok" : "off"}>
+                                {row.userEnabled ? "已开启" : "已关闭"}
+                              </span>
+                            ) : (
+                              // 原生还没接通的能力：开关置灰，也不再显示「已开启」——
+                              // 否则用户看着「已开启 + 当前版本不支持」只会以为坏了。
+                              <span className="per-tag" data-tone="off">这一版还没接通</span>
+                            )}
+                            {row.nativeSupported && (
+                              <span className="per-tag" data-tone="ok">App 已支持</span>
+                            )}
                             {row.missingRequirement && (
                               <span className="per-tag" data-tone="warn">
                                 <AlertCircle size={10} strokeWidth={2.4} /> {row.missingRequirement}
@@ -286,7 +292,8 @@ export function PerceptionSettings({ onNotice }: { onNotice?: (msg: string) => v
                         </div>
                         <div className="per-cap-toggle">
                           <Toggle
-                            checked={row.userEnabled}
+                            checked={row.nativeSupported ? row.userEnabled : false}
+                            disabled={!row.nativeSupported}
                             onChange={(v: boolean) => toggleCapability(row.id, v)}
                           />
                         </div>

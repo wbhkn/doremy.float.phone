@@ -1,7 +1,12 @@
-// v13：本次升版是为了强制作废旧缓存。
-// 折叠逻辑的修复已进 main，但客户端仍在跑旧 JS —— /_next/static/ 走 cache-first，
-// 旧包会被一直留在 RUNTIME_CACHE 里。升 CACHE_VERSION 会在 activate 时整批清空。
-const CACHE_VERSION = "ai-phone-pwa-v13";
+// v14：代码包不再 cache-first。
+//
+// /_next/static/ 下的 chunk 文件名跨部署**不变**（App Router 的 page chunk
+// 只按路由算名字，内容变了名字也不变），而 CDN 给的是 immutable 一年缓存。
+// 于是老客户端会一直跑旧 JS：用户明明升级了 APK、站点也发了新版，看到的还是
+// 旧页面。v13 靠「升 CACHE_VERSION 强制作废旧缓存」救过一次，这次改成从根上
+// 治：脚本/样式走「先给缓存、后台强制回源（cache:"reload"）」，字体和图片
+// 仍是 cache-first（它们体积大，不适合每次重验）。
+const CACHE_VERSION = "ai-phone-pwa-v14";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -71,6 +76,36 @@ async function cacheFirst(request) {
   const response = await fetch(request);
   if (response.ok) cache.put(request, response.clone());
   return response;
+}
+
+// 代码包（脚本/样式）专用：命中缓存先返回，同时后台绕过 HTTP 缓存重新拉一遍，
+// 新内容写回 RUNTIME_CACHE。这样本次仍跑旧代码，下一次导航就是新代码 ——
+// 既不白屏，也不会被 immutable 缓存钉死。
+async function staleWhileRevalidate(event) {
+  const { request } = event;
+  const cache = await caches.open(RUNTIME_CACHE);
+  const cached = await cache.match(request);
+  const refresh = fetch(request, { cache: "reload" })
+    .then((response) => {
+      if (response && response.ok) cache.put(request, response.clone());
+      return response;
+    })
+    .catch(() => null);
+  if (cached) {
+    // 后台更新要挂到 waitUntil，否则请求一返回 SW 就可能被系统回收。
+    // 事件已经结束的情况下 waitUntil 会抛，忽略即可（不影响本次返回）。
+    try {
+      event.waitUntil(refresh);
+    } catch {
+      // 该事件已结束，后台刷新随缘
+    }
+    return cached;
+  }
+  const fresh = await refresh;
+  if (fresh) return fresh;
+  const fallback = await caches.match("/");
+  if (fallback) return fallback;
+  throw new Error("offline");
 }
 
 // 离线推送：App 被杀后由系统唤起 SW 弹通知。payload 由服务端 JSON 编码。
@@ -180,7 +215,15 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(networkFirst(request));
     return;
   }
-  if (isCacheableRequest(request)) {
-    event.respondWith(cacheFirst(request));
+  if (!isCacheableRequest(request)) return;
+  const destination = request.destination;
+  // 代码包（脚本/样式）走 stale-while-revalidate，其余静态资源仍 cache-first：
+  // 字体动辄十几 MB，不该为了「可能的新版本」反复重下。
+  const isCode = request.url.includes("/_next/static/")
+    && (destination === "script" || destination === "style" || destination === "worker");
+  if (isCode) {
+    event.respondWith(staleWhileRevalidate(event));
+    return;
   }
+  event.respondWith(cacheFirst(request));
 });
