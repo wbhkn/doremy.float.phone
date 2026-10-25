@@ -28,8 +28,8 @@ android {
         // 1.0.12：截屏可选收件人；位置感知；睡眠（Health Connect）。
         // 1.0.14：WebView 内补齐 Notification API（映射到原生通知桥）。
         // 1.0.17：老机型（Android 10 及以下）改用系统授权框截屏，截屏不再要求 Android 11+。
-        versionCode 17
-        versionName "1.0.17"
+        versionCode 18
+        versionName "1.0.18"
         buildConfigField "String", "SITE_URL", "\"${siteUrl}\""
     }
 
@@ -71,6 +71,7 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.activity:activity-ktx:1.9.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     // Health Connect：读睡眠。选它而不是各厂商自己的运动 App SDK，
     // 是因为它由系统统一汇聚（华为/小米/三星健康都往里写），接一次就够，
