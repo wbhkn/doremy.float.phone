@@ -148,16 +148,16 @@ export function BilibiliSettings({ onNotice }: { onNotice?: (msg: string) => voi
             <div className="ui-group-card !items-stretch">
                 <span className="menu-label font-medium">怎么拿到这串 Cookie</span>
                 <span className="menu-desc !mt-0">
-                    1. 在电脑浏览器（或手机浏览器的「请求桌面网站」）打开 bilibili.com 并登录；
+                    1. 最省事是用电脑：浏览器打开 bilibili.com 并登录。手边没有电脑的话，手机上装一个 Kiwi Browser（Android 版 Chromium，自带开发者工具），用它登录 bilibili.com；
                 </span>
                 <span className="menu-desc !mt-0">
-                    2. 按 F12 打开开发者工具 → Application（应用）→ Cookies → https://www.bilibili.com；
+                    2. 打开开发者工具（电脑按 F12，Kiwi 在菜单里）→ Application（应用）→ Cookies → https://www.bilibili.com；
                 </span>
                 <span className="menu-desc !mt-0">
-                    3. 把 SESSDATA、bili_jct、DedeUserID 三项按 <code>SESSDATA=…; bili_jct=…; DedeUserID=…</code> 拼起来粘到上面；
+                    3. 找到 SESSDATA（必填）、bili_jct、DedeUserID，按 SESSDATA=…; bili_jct=…; DedeUserID=… 的格式拼成一行，粘到上面。
                 </span>
                 <span className="menu-desc !mt-0">
-                    只填 SESSDATA 也能用。这串东西只存在这台手机上，不会上传到别处；在 B 站点「退出登录」它就立刻失效。
+                    只填 SESSDATA 也能用。这串东西只存在这台手机上，不会上传到别处；在 B 站「退出登录」它就立刻失效。
                 </span>
             </div>
         </div>
