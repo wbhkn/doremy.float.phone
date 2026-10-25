@@ -17,6 +17,11 @@ export const dynamic = "force-dynamic";
  * GET /api/bili/related?bvid=…
  * GET /api/bili/online?bvid=…
  * GET /api/bili/user?mid=2
+ * GET /api/bili/me                ← 登录态自检（设置页「测试登录」）
+ *
+ * 账号（可选）：请求头 `x-bili-cookie` 里放整串 Cookie（SESSDATA 等）。
+ * 只有用户自己在设置里粘贴过才带，默认匿名。Cookie 只在这一次请求里用，
+ * 不落盘、不入日志。
  */
 export async function GET(request: Request, { params }: { params: Promise<{ action: string }> }) {
     const { action } = await params;
@@ -26,7 +31,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
         query[key] = value;
     });
 
-    const result = await runBiliAction(action, query);
+    const cookie = (request.headers.get("x-bili-cookie") || "").trim().slice(0, 4096);
+    const result = await runBiliAction(action, query, cookie);
     return NextResponse.json(result, {
         status: result.ok ? 200 : 200,
         headers: {

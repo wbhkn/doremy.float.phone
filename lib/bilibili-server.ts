@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
  * B 站公开数据代理（服务端专用）。
@@ -23,6 +24,17 @@ const MIXIN_KEY_ENC_TAB = [
     14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21,
     56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
 ];
+
+/**
+ * 请求级上下文：登录态 Cookie（可选）。
+ *
+ * 用 AsyncLocalStorage 而不是给每个 action 加工参，是因为「加 Cookie」这件
+ * 事对所有接口都是同一个动作——签名、清洗、组装都在 requestJson 一处完成，
+ * 各个 action 不用知道自己带没带账号。
+ *
+ * 注意：**只有用户自己在设置里粘贴过 Cookie 才会带**，默认是匿名裸 UA。
+ */
+const requestContext = new AsyncLocalStorage<{ cookie: string }>();
 
 const TIMEOUT_MS = 12_000;
 
@@ -64,6 +76,7 @@ const CACHE_TTL: Record<string, number> = {
     related: 180_000,
     online: 60_000,
     user: 300_000,
+    me: 15_000,
 };
 
 function md5(input: string): string {
@@ -80,9 +93,11 @@ class BiliRiskControlError extends Error {
 async function requestJson(url: string): Promise<{ status: number; json: Record<string, unknown> }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const cookie = requestContext.getStore()?.cookie || "";
     try {
         const res = await fetch(url, {
-            headers: { "User-Agent": UA },
+            // 匿名时只有 UA；有账号时才补 Cookie（整串原样转发，不做任何改写）
+            headers: cookie ? { "User-Agent": UA, Cookie: cookie } : { "User-Agent": UA },
             cache: "no-store",
             signal: controller.signal,
         });
@@ -429,10 +444,58 @@ async function actionUser(query: Record<string, string>): Promise<BiliActionResu
     return result;
 }
 
-const ACTIONS = ["feed", "popular", "ranking", "search", "video", "comments", "related", "online", "user"] as const;
+const ACTIONS = [
+    "feed",
+    "popular",
+    "ranking",
+    "search",
+    "video",
+    "comments",
+    "related",
+    "online",
+    "user",
+    "me",
+] as const;
+
+/**
+ * 登录态自检（设置页「测试登录」用）。
+ * 没带 Cookie 时 isLogin=false，不算错误——那是匿名可用的正常状态。
+ */
+async function actionMe(): Promise<BiliActionResult> {
+    const { json } = await biliJson("https://api.bilibili.com/x/web-interface/nav");
+    const data = (json.data || {}) as Record<string, unknown>;
+    const level = (data.level_info || {}) as Record<string, unknown>;
+    const vip = (data.vip || {}) as Record<string, unknown>;
+    const isLogin = data.isLogin === true;
+    return {
+        ok: true,
+        action: "me",
+        isLogin,
+        uname: trim(data.uname, 40),
+        mid: num(data.mid),
+        level: num(level.current_level),
+        vip: num(vip.status) > 0,
+        message: isLogin ? "" : "不是登录状态：Cookie 没配置，或者已经过期了",
+    };
+}
 
 /** 统一入口：把「我们自己定义的动作名」翻译成 B 站接口调用 */
-export async function runBiliAction(action: string, query: Record<string, string> = {}): Promise<BiliActionResult> {
+export async function runBiliAction(
+    action: string,
+    query: Record<string, string> = {},
+    cookie = "",
+): Promise<BiliActionResult> {
+    const cleanCookie = String(cookie || "").trim();
+    if (!cleanCookie) return runBiliActionInner(action, query, false);
+    // 带上账号时放进请求级上下文，requestJson 负责补 Cookie 头
+    return requestContext.run({ cookie: cleanCookie }, () => runBiliActionInner(action, query, true));
+}
+
+async function runBiliActionInner(
+    action: string,
+    query: Record<string, string>,
+    authed: boolean,
+): Promise<BiliActionResult> {
     const key = String(action || "").trim().toLowerCase();
     if (!ACTIONS.includes(key as (typeof ACTIONS)[number])) {
         return {
@@ -443,7 +506,8 @@ export async function runBiliAction(action: string, query: Record<string, string
         };
     }
 
-    const cacheKey = `${key}:${JSON.stringify(query)}`;
+    // 缓存键要区分「带账号」和「匿名」：个性化推荐流和匿名热门不一样
+    const cacheKey = `${key}:${authed ? "u" : "a"}:${JSON.stringify(query)}`;
     const cached = responseCache.get(cacheKey);
     const ttl = CACHE_TTL[key] || 0;
     if (cached && Date.now() - cached.at < ttl) return cached.payload;
@@ -477,6 +541,9 @@ export async function runBiliAction(action: string, query: Record<string, string
                 break;
             case "user":
                 payload = await actionUser(query);
+                break;
+            case "me":
+                payload = await actionMe();
                 break;
             default:
                 payload = { ok: false, action: key, reason: "unknown_action", message: "动作不可用" };

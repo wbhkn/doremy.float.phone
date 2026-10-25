@@ -5,8 +5,12 @@
  * 见 lib/bilibili-server.ts 里关于风控的注释），因为 api.bilibili.com 没有
  * CORS 头、浏览器里直接 fetch 一定失败；search 还需要 md5 的 wbi 签名。
  *
- * 只读：不登录、不点赞投币、不发评论、不收藏。角色能做的只有「看」。
+ * 只读：不点赞投币、不发评论、不收藏。如果这台手机配了用户自己的 B 站账号
+ * （Cookie，见 lib/bilibili-auth.ts），请求会带上它，推荐流就是「用我的号刷」；
+ * 没配就是匿名看热门。角色能做的始终只有「看」。
  */
+
+import { biliCookieHeader } from "./bilibili-auth";
 
 export const BILIBILI_BROWSE_CAPABILITY_ID = "bilibili_browse";
 
@@ -52,11 +56,12 @@ export const BILIBILI_PARAMETER_SCHEMA = JSON.stringify({
 });
 
 export const BILIBILI_USAGE_GUIDE = [
-    "【刷B站】你能自己上哔哩哔哩逛，看真实的视频和评论（只读：不登录、不点赞、不投币、不评论、不收藏）。",
+    "【刷B站】你能自己上哔哩哔哩逛，看真实的视频和评论（只读：不点赞、不投币、不发评论；看不看得到登录内容取决于{{user}}有没有给账号）。",
     "典型刷法：feed 看一屏推荐 → 挑一条 video 看详情/简介 → comments 看观众在说什么 → related 顺着推荐继续；想换一屏就 feed 把 fresh_idx 加 1；想找特定的就 search；排行榜用 ranking。",
     "怎么用才像真的在刷：不要一次把所有标题念给{{user}}听；挑你真感兴趣的 1-2 条，看完说说你的感受、吐槽、联想到的事，再自然地说你在 B 站看到什么。",
+    "如果这台手机配了{{user}}自己的 B 站账号，feed 就是 TA 账号的推荐流——就像你拿 TA 的手机随手刷。看到和 TA 有关的内容可以提一句，但别把 TA 的收藏/历史当谈资逐条汇报。",
     "参数要点：bvid 是视频号（BV 开头）；user 要 mid（数字 id，video 结果里的 up_mid）；排行榜可带 rid 选分区；一次 ps 不要超过 20。",
-    "【边界】遇到「风控」类报错说明 B 站这次按频率拦了（隔一两分钟再试，别连着重试）；一次对话里别刷太多轮，看几条就够了。数据只包含公开信息，看不到需要登录的内容。",
+    "【边界】遇到「风控」类报错说明 B 站这次按频率拦了（隔一两分钟再试，别连着重试）；一次对话里别刷太多轮，看几条就够了。",
 ].join("\n");
 
 type BiliItem = {
@@ -114,7 +119,10 @@ export async function biliApiCall(action: string, params: Record<string, string 
     const query = search.toString();
     const url = `/api/bili/${encodeURIComponent(action)}${query ? `?${query}` : ""}`;
     try {
-        const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
+        const res = await fetch(url, {
+            method: "GET",
+            headers: { Accept: "application/json", ...biliCookieHeader() },
+        });
         const text = await res.text();
         let json: BiliResponse | null = null;
         try {
@@ -201,6 +209,38 @@ export function formatBiliResult(action: string, data: BiliResponse): string {
         return `此刻有 ${data.total || "?"} 人一起在看这条视频。`;
     }
     return JSON.stringify(data).slice(0, 1500);
+}
+
+export type BiliLoginState = {
+    isLogin: boolean;
+    uname: string;
+    mid: number;
+    level: number;
+    vip: boolean;
+    message: string;
+};
+
+/** 设置页「测试登录」用：拿当前 Cookie 去问 B 站「我是谁」 */
+export async function biliCheckLogin(): Promise<BiliLoginState> {
+    const data = await biliApiCall("me");
+    if (!data.ok) {
+        return {
+            isLogin: false,
+            uname: "",
+            mid: 0,
+            level: 0,
+            vip: false,
+            message: data.message || "没能连上 B 站",
+        };
+    }
+    return {
+        isLogin: data.isLogin === true,
+        uname: typeof data.uname === "string" ? data.uname : "",
+        mid: Number(data.mid) || 0,
+        level: Number(data.level) || 0,
+        vip: data.vip === true,
+        message: typeof data.message === "string" ? data.message : "",
+    };
 }
 
 /** 聊天里给用户看的那一行提示（不喧宾夺主） */
