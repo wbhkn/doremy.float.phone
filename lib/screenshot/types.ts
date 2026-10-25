@@ -15,11 +15,20 @@
 
 /** 壳如实上报的截屏状态。 */
 export type ScreenshotCapabilities = {
-  /** 系统版本够不够（Android 11+） */
+  /** 有没有任何一条能走通的截屏路（无障碍 或 系统授权） */
   supported?: boolean;
-  /** 无障碍服务是否已开启（截屏的前提） */
+  /** 无障碍服务是否已开启（Android 11+ 直取画面走它） */
   accessibilityOn?: boolean;
-  /** 现在是否真的可以截（supported && accessibilityOn） */
+  /** 能不能走「系统授权」这条路（Android 5+ 都行，老机型靠它） */
+  projection?: boolean;
+  /**
+   * 现在实际会走哪条路：
+   *  - accessibility：无障碍直取，不弹框；
+   *  - projection：每次点都弹一次系统授权框（Android 10 及以下只有这条）；
+   *  - none：两条都不行。
+   */
+  mode?: "accessibility" | "projection" | "none";
+  /** 现在是否真的可以截（mode !== "none"） */
   ready?: boolean;
 };
 
@@ -41,6 +50,10 @@ export type ScreenshotCaptureResult =
 export type ScreenshotDiagnostics = {
   supported?: boolean;
   accessibilityOn?: boolean;
+  /** 能不能走系统授权截屏 */
+  projection?: boolean;
+  /** 当前实际走的路 */
+  mode?: "accessibility" | "projection" | "none";
   ready?: boolean;
   capturing?: boolean;
   /** 最近一次失败描述（空串 = 没记到失败） */
@@ -95,10 +108,14 @@ export type ScreenshotBallCapabilities = {
 
 /** 原生上报的查岗能力与状态。 */
 export type CheckInCapabilities = {
-  /** 系统版本够不够（Android 11+） */
+  /** 有没有任何一条能走通的截屏路（无障碍 或 系统授权） */
   supported?: boolean;
   /** 无障碍服务是否已开启 */
   accessibilityOn?: boolean;
+  /** 能不能走系统授权截屏（老机型靠它） */
+  projection?: boolean;
+  /** 当前实际走的路 */
+  mode?: "accessibility" | "projection" | "none";
   /** 浮窗权限与常驻服务是否就绪（查岗浮层的前提） */
   canDraw?: boolean;
 };

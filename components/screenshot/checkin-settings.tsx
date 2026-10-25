@@ -101,15 +101,21 @@ export function CheckInSettings({ onNotice }: { onNotice?: (msg: string) => void
       return;
     }
     if (!inShell) { onNotice?.("当前不在小手机 App 内，查岗需要安卓壳"); return; }
-    if (!readiness.supported) { onNotice?.("系统版本太低，查岗需要 Android 11 及以上"); return; }
-    if (!readiness.accessibilityOn) { onNotice?.("还需要开启无障碍服务，查岗才能截到屏"); return; }
+    if (!readiness.supported) { onNotice?.("这台手机没有可用的截屏通道，查岗用不了"); return; }
+    // 只有走无障碍那条路才需要无障碍；老机型走系统授权框，不要求开无障碍。
+    if (readiness.mode === "accessibility" && !readiness.accessibilityOn) {
+      onNotice?.("还需要开启无障碍服务，查岗才能截到屏");
+      return;
+    }
     // 开启时把服务暖起来（此刻 App 在前台，是唯一能合法启动前台服务的时机）
     if (!prepareCheckInService()) {
       onNotice?.("没能准备查岗浮层，请先授予「显示在其他应用上层」权限");
       return;
     }
-    onNotice?.("查岗已开启。到点它会截屏，但会先弹窗问你要不要给它看");
-  }, [refresh, inShell, readiness.supported, readiness.accessibilityOn, onNotice]);
+    onNotice?.(readiness.mode === "projection"
+      ? "查岗已开启。到点会截屏，但老机型每次都会弹一次系统授权框，得你点「立即开始」"
+      : "查岗已开启。到点它会截屏，但会先弹窗问你要不要给它看");
+  }, [refresh, inShell, readiness.supported, readiness.accessibilityOn, readiness.mode, onNotice]);
 
   const patch = useCallback((characterId: string, next: { minMinutes?: number; maxMinutes?: number; dailyLimit?: number }) => {
     saveCharacterCheckIn(characterId, next);
@@ -323,14 +329,22 @@ export function CheckInSettings({ onNotice }: { onNotice?: (msg: string) => void
             ok: readiness.bridgeAvailable,
           },
           {
-            label: "② 系统版本",
-            value: readiness.supported ? "支持（Android 11+）" : "太低，需要 Android 11 及以上",
+            label: "② 截屏通道",
+            value: readiness.mode === "accessibility"
+              ? "无障碍直取（不弹框）"
+              : readiness.mode === "projection"
+                ? "系统授权框（每次都要你点一下）"
+                : "没有可用的截屏通道",
             ok: readiness.supported,
           },
           {
             label: "③ 无障碍服务",
-            value: readiness.accessibilityOn ? "已开启" : "未开启（查岗截屏的前提）",
-            ok: readiness.accessibilityOn,
+            value: readiness.accessibilityOn
+              ? "已开启"
+              : readiness.mode === "projection"
+                ? "未开启（老机型走系统授权，不需要它）"
+                : "未开启（查岗截屏的前提）",
+            ok: readiness.mode === "projection" ? undefined : readiness.accessibilityOn,
           },
           {
             label: "④ 浮窗权限",
@@ -401,8 +415,8 @@ export function CheckInSettings({ onNotice }: { onNotice?: (msg: string) => void
                 ? readiness.ready
                   ? "查岗浮层已就绪，到点能弹出来"
                   : !readiness.supported
-                    ? "系统版本太低（需要 Android 11 及以上）"
-                    : !readiness.accessibilityOn
+                    ? "这台手机没有可用的截屏通道"
+                    : readiness.mode === "accessibility" && !readiness.accessibilityOn
                       ? "无障碍服务未开启"
                       : "浮窗权限未授予（与你开通话浮窗用的是同一个权限）"
                 : "当前 App 版本还没有查岗浮层，请更新安卓壳"}

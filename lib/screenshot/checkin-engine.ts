@@ -30,6 +30,7 @@ import {
 } from "./checkin-config";
 import { consumePendingUserShot, hasCheckInBridge, readCheckInCapabilities, requestCheckIn } from "./checkin";
 import { resolveCheckInGuidance } from "./checkin-guidance";
+import type { CheckInCapabilities } from "./types";
 import { ensureShellOverlayListener, subscribeShellOverlayEvents } from "../shell-call-overlay";
 
 /** 一次查岗尝试的结论（给调用方/设置页做记录用）。 */
@@ -43,21 +44,42 @@ export function checkInReadiness(): {
   bridgeAvailable: boolean;
   supported: boolean;
   accessibilityOn: boolean;
+  projection: boolean;
+  mode: "accessibility" | "projection" | "none";
   overlayReady: boolean;
   ready: boolean;
 } {
   const caps = readCheckInCapabilities();
   const bridgeAvailable = hasCheckInBridge();
-  const supported = caps.supported === true;
+  const mode = resolveCheckInMode(caps);
+  const supported = mode !== "none";
   const accessibilityOn = caps.accessibilityOn === true;
   const overlayReady = caps.canDraw === true;
   return {
     bridgeAvailable,
     supported,
     accessibilityOn,
+    projection: caps.projection === true || mode === "projection",
+    mode,
     overlayReady,
-    ready: bridgeAvailable && supported && accessibilityOn && overlayReady,
+    ready: bridgeAvailable && supported && overlayReady,
   };
+}
+
+/**
+ * 归一化查岗这次会走哪条截屏路。
+ *
+ * 老 APK 只报 supported/accessibilityOn，按老语义推；新 APK 直接给 mode。
+ * 注意 projection 只能从「App 在前台」时拉起授权框，所以查岗期间用户
+ * 得让 App 留在前台——这一点在设置页的文案里已经交代。
+ */
+function resolveCheckInMode(caps: CheckInCapabilities): "accessibility" | "projection" | "none" {
+  if (caps.mode === "accessibility" || caps.mode === "projection" || caps.mode === "none") {
+    return caps.mode;
+  }
+  if (caps.supported === true && caps.accessibilityOn === true) return "accessibility";
+  if (caps.projection === true) return "projection";
+  return "none";
 }
 
 /** 找一个角色的最新私聊会话（查岗只发生在私聊里）。 */
@@ -86,8 +108,10 @@ export async function runCheckIn(
 
   const readiness = checkInReadiness();
   if (!readiness.bridgeAvailable) return { ok: false, reason: "当前 App 版本不支持查岗" };
-  if (!readiness.supported) return { ok: false, reason: "系统版本太低，查岗需要 Android 11 及以上" };
-  if (!readiness.accessibilityOn) return { ok: false, reason: "无障碍服务没有开启" };
+  if (!readiness.supported) return { ok: false, reason: "这台手机没有可用的截屏通道，查岗做不了" };
+  if (readiness.mode === "accessibility" && !readiness.accessibilityOn) {
+    return { ok: false, reason: "无障碍服务没有开启" };
+  }
   if (!readiness.overlayReady) return { ok: false, reason: "浮窗权限没有授予，弹不出确认浮层" };
 
   const character = loadCharacters().find(c => c.id === characterId);
@@ -309,8 +333,10 @@ export async function requestCheckInForTool(characterId: string): Promise<CheckI
 
   const readiness = checkInReadiness();
   if (!readiness.bridgeAvailable) return { ok: false, message: "当前 App 版本不支持这个动作，需要更新安卓壳。" };
-  if (!readiness.supported) return { ok: false, message: "TA 的系统版本太低（需要 Android 11 及以上），暂时做不到。" };
-  if (!readiness.accessibilityOn) return { ok: false, message: "TA 还没有开启无障碍服务，暂时截不到屏幕。" };
+  if (!readiness.supported) return { ok: false, message: "TA 这台手机没有可用的截屏通道，暂时做不到。" };
+  if (readiness.mode === "accessibility" && !readiness.accessibilityOn) {
+    return { ok: false, message: "TA 还没有开启无障碍服务，暂时截不到屏幕。" };
+  }
   if (!readiness.overlayReady) return { ok: false, message: "TA 还没有授予浮窗权限，弹不出确认框。" };
 
   const sessionId = findLatestPrivateSession(characterId);

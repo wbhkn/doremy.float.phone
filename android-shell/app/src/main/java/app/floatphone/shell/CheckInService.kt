@@ -495,8 +495,11 @@ class CheckInService : Service() {
          * 等满 90 秒才超时——表现就是「点了没反应」，而且查不出原因。
          */
         fun capabilitiesJson(context: Context): String = JSONObject()
-            .put("supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            // 1.0.17 起「能不能截」不再等于「Android 11+」：老机型回落到系统授权框。
+            .put("supported", ScreenshotBridge.captureMode() != "none")
             .put("accessibilityOn", ScreenshotBridge.isAccessibilityOn())
+            .put("projection", ProjectionCapture.isSupported())
+            .put("mode", ScreenshotBridge.captureMode())
             .put("canDraw", canDraw(context))
             .put("running", running)
             .toString()

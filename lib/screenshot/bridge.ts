@@ -60,19 +60,34 @@ export function readScreenshotCapabilities(): ScreenshotCapabilities {
   }
 }
 
-/** 发起时原生回的那一下：只表示「受理了没」。 */
-type CaptureAck = { ok: true } | { ok: false; reason: string };
+/**
+ * 发起时原生回的那一下：只表示「受理了没」。
+ *
+ * `mode` 是 1.0.17 起新加的：`projection` 表示这次要用户点一下系统授权框，
+ * 而不是无障碍直接取——两者等待时间差着数量级，超时上限得跟着变。
+ */
+type CaptureAck =
+  | { ok: true; mode?: "accessibility" | "projection" }
+  | { ok: false; reason: string };
 
 function parseAck(raw: unknown): CaptureAck {
   if (typeof raw !== "string" || !raw) return { ok: false, reason: "截屏调用没有返回结果" };
   try {
-    const parsed = JSON.parse(raw) as { ok?: boolean; reason?: string };
-    if (parsed?.ok === true) return { ok: true };
+    const parsed = JSON.parse(raw) as { ok?: boolean; reason?: string; mode?: string };
+    if (parsed?.ok === true) {
+      const mode = parsed.mode === "projection" || parsed.mode === "accessibility"
+        ? parsed.mode
+        : undefined;
+      return { ok: true, mode };
+    }
     return { ok: false, reason: parsed?.reason || "截屏未能发起" };
   } catch {
     return { ok: false, reason: "截屏返回内容无法解析" };
   }
 }
+
+/** 等系统授权框时给用户的时间：从点「立即开始」到真正取帧，正常人 10 秒内。 */
+const PROJECTION_TIMEOUT_MS = 120_000;
 
 /**
  * 截一张当前屏幕。
@@ -124,9 +139,12 @@ export function captureScreenshot(timeoutMs = 8000): Promise<ScreenshotCaptureRe
       }
     });
 
-    timer = setTimeout(() => {
-      finish({ ok: false, reason: "截屏超时了，请确认无障碍服务还开着，然后重试" });
-    }, Math.max(1000, timeoutMs));
+    const armTimer = (ms: number, reason: string) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => finish({ ok: false, reason }), Math.max(1000, ms));
+    };
+
+    armTimer(timeoutMs, "截屏超时了，请确认无障碍服务还开着，然后重试");
 
     // 发起。这里同步抛或返回失败都在 finish 之前，settled 保证只结算一次。
     let ack: CaptureAck;
@@ -135,6 +153,17 @@ export function captureScreenshot(timeoutMs = 8000): Promise<ScreenshotCaptureRe
     } catch {
       ack = { ok: false, reason: "截屏调用失败" };
     }
-    if (!ack.ok) finish({ ok: false, reason: ack.reason });
+    if (!ack.ok) {
+      finish({ ok: false, reason: ack.reason });
+      return;
+    }
+    if (ack.mode === "projection") {
+      // 老机型走系统授权：得等用户自己去点「立即开始」，8 秒根本不够，
+      // 换成「等人」的上限，失败文案也要写成人能懂的样子。
+      armTimer(
+        PROJECTION_TIMEOUT_MS,
+        "还没等到截屏结果——可能你取消了授权，或授权框被系统收走了。再点一次试试",
+      );
+    }
   });
 }

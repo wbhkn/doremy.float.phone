@@ -53,7 +53,9 @@ import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismi
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Eye, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+// 用户主动「让她看一眼我现在的屏幕」：截一张图当图片消息发出去。
+import { peekScreenToCharacter } from "@/lib/screenshot/peek";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -765,6 +767,23 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         onClosePanels();
     };
 
+    // 「看一眼屏幕」：截一张 → 作为图片消息发进私聊 → 让角色接着回应。
+    // 老机型（Android 10 及以下）会先弹系统授权框，所以要等一会儿才出图。
+    const [peeking, setPeeking] = useState(false);
+    const handlePeekScreen = useCallback(async () => {
+        if (peeking || !characterId || isGroup) return;
+        setPeeking(true);
+        try {
+            const result = await peekScreenToCharacter(characterId);
+            // 失败时 peek 自己已经往聊天里写了系统消息，这里不再打扰用户。
+            if (!result.ok) return;
+            onClosePanels();
+            onTriggerAIResponse();
+        } finally {
+            setPeeking(false);
+        }
+    }, [peeking, characterId, isGroup, onClosePanels, onTriggerAIResponse]);
+
     const panelOpen = showEmojiPanel || showStickerPanel || showPlusMenu;
     const suggestCharacterIds = useMemo(
         () => (isGroup ? (stickerCharacterIds || []) : characterId ? [characterId] : []),
@@ -790,6 +809,12 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             label: action.label,
             onClick: () => onOpenCustomPlusAction(action),
         })),
+        // 只在私聊里给：群聊「让她看一眼」既没有确定的收件人，也不该把屏幕丢进群里。
+        ...(characterId && !isGroup ? [{
+            icon: <Eye size={22} strokeWidth={1.5} color={peeking ? "var(--c-icon-active)" : "var(--c-text)"} />,
+            label: peeking ? "正在看…" : "看一眼屏幕",
+            onClick: () => { void handlePeekScreen(); },
+        }] : []),
     ];
 
     return (

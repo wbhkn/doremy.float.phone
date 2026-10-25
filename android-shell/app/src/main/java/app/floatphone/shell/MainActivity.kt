@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -56,7 +57,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         val SITE_URL: String = BuildConfig.SITE_URL
-        const val VERSION = "1.0.15"
+        const val VERSION = "1.0.17"
         /** 来电接听等场景的站内深链（必须以 SITE_URL 开头，否则忽略） */
         const val EXTRA_OPEN_URL = "open_url"
         /** 外部 App（如桌宠）唤起本壳用的自定义 scheme：floatshell://open?url=<站内地址> */
@@ -277,6 +278,31 @@ class MainActivity : AppCompatActivity() {
         if (granted) PushService.start(this)
     }
 
+    // 系统授权截屏（MediaProjection）的授权结果。老机型（Android 10 及以下）
+    // 没有无障碍截屏 API，只能走这条路——代价是每截一张弹一次系统确认框。
+    // 用户点「立即开始」/「取消」后由 ProjectionCapture 收尾，这里只转交结果。
+    private val projectionConsentLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        ProjectionCapture.onConsentResult(this, result.resultCode, result.data)
+    }
+
+    /**
+     * 拉起系统「开始截取屏幕」授权框。
+     *
+     * @return true 表示已经拉起（结果走 [projectionConsentLauncher]）；
+     *         false 表示这台机器给不出授权请求，调用方应如实报错。
+     */
+    fun requestScreenCaptureConsent(): Boolean {
+        val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+            ?: return false
+        val intent = runCatching { manager.createScreenCaptureIntent() }.getOrNull() ?: return false
+        return runCatching {
+            projectionConsentLauncher.launch(intent)
+            true
+        }.getOrDefault(false)
+    }
+
     // 网页侧 getUserMedia（通话按住说话、语音条录音、视频通话摄像头）触发的
     // WebView 权限请求：先要系统运行时权限，拿到后再转授给页面。
     // 不实现 onPermissionRequest 时 WebView 会静默拒绝，页面永远拿不到麦克风。
@@ -326,6 +352,8 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 老机型的系统授权截屏需要一个 Activity 来拉起授权框，这里登记当前页面。
+        ProjectionCapture.attachHost(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         enableDisplayCutoutCover()
         hideSystemStatusBar()
@@ -633,6 +661,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (ShellBus.webView === webView) ShellBus.webView = null
+        ProjectionCapture.detachHost(this)
         CookieManager.getInstance().flush()
         webView.destroy()
         super.onDestroy()

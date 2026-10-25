@@ -23,26 +23,50 @@ export type ScreenshotOutcome =
   | { ok: true; record: ScreenshotRecord }
   | { ok: false; reason: string };
 
-/** 门控检查结果，设置面板与角色工具共用。 */
+/**
+ * 门控检查结果，设置面板与角色工具共用。
+ *
+ * 1.0.17 起有两条截屏路，所以「能不能截」不再等同于「无障碍开没开」：
+ *   · mode=accessibility → 需要无障碍（Android 11+，不弹框）；
+ *   · mode=projection    → 每次弹一次系统授权框（Android 10 及以下只有这条）。
+ */
 export function checkScreenshotAvailability(): {
   configEnabled: boolean;
   bridgeAvailable: boolean;
   supported: boolean;
   accessibilityOn: boolean;
+  projection: boolean;
+  mode: "accessibility" | "projection" | "none";
   available: boolean;
 } {
   const config = loadScreenshotConfig();
   const caps = readScreenshotCapabilities();
   const bridgeAvailable = hasScreenshotBridge();
-  const supported = caps.supported === true;
-  const accessibilityOn = caps.accessibilityOn === true;
+  const mode = resolveCaptureMode(caps);
   return {
     configEnabled: config.enabled,
     bridgeAvailable,
-    supported,
-    accessibilityOn,
-    available: config.enabled && bridgeAvailable && supported && accessibilityOn,
+    supported: mode !== "none",
+    accessibilityOn: caps.accessibilityOn === true,
+    projection: caps.projection === true || mode === "projection",
+    mode,
+    available: config.enabled && bridgeAvailable && mode !== "none",
   };
+}
+
+/**
+ * 归一化「这次会走哪条路」。
+ *
+ * 老 APK 不会报 mode，只能按老语义推：supported && accessibilityOn 才算能用；
+ * 新 APK 直接给 mode，照抄即可。
+ */
+export function resolveCaptureMode(caps: ScreenshotCapabilities): "accessibility" | "projection" | "none" {
+  if (caps.mode === "accessibility" || caps.mode === "projection" || caps.mode === "none") {
+    return caps.mode;
+  }
+  if (caps.supported === true && caps.accessibilityOn === true) return "accessibility";
+  if (caps.projection === true) return "projection";
+  return "none";
 }
 
 /** 截屏能力快照（含授权态），给设置面板显示三态。 */
@@ -65,10 +89,13 @@ export async function captureAndStoreScreenshot(options?: { silent?: boolean }):
     return { ok: false, reason: "当前 App 版本不支持截屏，需要更新安卓壳" };
   }
   const caps = readScreenshotCapabilities();
-  if (caps.supported !== true) {
-    return { ok: false, reason: "系统版本太低，截屏需要 Android 11 及以上" };
+  const mode = resolveCaptureMode(caps);
+  if (mode === "none") {
+    return { ok: false, reason: "这台手机没有可用的截屏通道，暂时截不到屏幕" };
   }
-  if (caps.accessibilityOn !== true) {
+  // 只有在必须依赖无障碍的那条路上，才把「无障碍没开」当失败；老机型走
+  // 系统授权框，不要求开无障碍（否则 Mate 10 这类机器永远用不了）。
+  if (mode === "accessibility" && caps.accessibilityOn !== true) {
     return { ok: false, reason: "无障碍服务没有开启，截屏无法进行" };
   }
 

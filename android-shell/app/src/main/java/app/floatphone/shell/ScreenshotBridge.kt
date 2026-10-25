@@ -72,12 +72,30 @@ object ScreenshotBridge {
     /** 无障碍服务是否已开（截屏的唯一前提）。 */
     fun isAccessibilityOn(): Boolean = service != null
 
+    /**
+     * 现在实际会走哪条截屏路：
+     *   · `accessibility` — 无障碍直取（不弹框，Android 11+）；
+     *   · `projection`    — 系统授权弹框（老机型兜底，Android 5+）；
+     *   · `none`          — 两条都不行。
+     */
+    fun captureMode(): String = when {
+        canCapture() -> "accessibility"
+        ProjectionCapture.isSupported() -> "projection"
+        else -> "none"
+    }
+
     /** 能力与状态快照，给设置面板显示三态。 */
-    fun capabilitiesJson(): String = JSONObject()
-        .put("supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-        .put("accessibilityOn", service != null)
-        .put("ready", canCapture())
-        .toString()
+    fun capabilitiesJson(): String {
+        val mode = captureMode()
+        return JSONObject()
+            .put("supported", mode != "none")
+            .put("accessibilityOn", service != null)
+            // 老机型（Android 10 及以下）没有无障碍截屏，但可以用系统授权框截。
+            .put("projection", ProjectionCapture.isSupported())
+            .put("mode", mode)
+            .put("ready", mode != "none")
+            .toString()
+    }
 
     // ── 诊断留痕 ────────────────────────────────────────────
     //
@@ -117,8 +135,10 @@ object ScreenshotBridge {
 
     /** 诊断快照：截屏桥的内部状态，给设置页的「诊断」面板读。 */
     fun diagnosticsJson(): String = JSONObject()
-        .put("supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        .put("supported", captureMode() != "none")
         .put("accessibilityOn", service != null)
+        .put("projection", ProjectionCapture.isSupported())
+        .put("mode", captureMode())
         .put("ready", canCapture())
         .put("capturing", capturing)
         .put("lastError", lastError)
@@ -136,22 +156,36 @@ object ScreenshotBridge {
      *         （成功带 base64/width/height，失败带 reason）。
      */
     fun capture(): JSONObject {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return fail("系统版本太低，截屏需要 Android 11 及以上")
-        }
-        if (service == null) return fail("无障碍服务没有开启，截屏无法进行")
-        if (capturing) return fail("上一张还没截完，请稍等一下")
-
-        captureBitmap { bitmap, error ->
-            if (bitmap == null) {
-                val reason = error ?: "截屏失败"
-                recordFailure("capture", reason)
-                publish(JSONObject().put("ok", false).put("reason", reason))
-                return@captureBitmap
+        return when (captureMode()) {
+            "accessibility" -> {
+                if (capturing) return fail("上一张还没截完，请稍等一下")
+                if (!captureViaAccessibility { bitmap, error ->
+                        if (bitmap == null) {
+                            val reason = error ?: "截屏失败"
+                            recordFailure("capture", reason)
+                            publish(JSONObject().put("ok", false).put("reason", reason))
+                        } else {
+                            encodeAndPublish(bitmap)
+                        }
+                    }
+                ) {
+                    return fail("无障碍服务没有开启，截屏无法进行")
+                }
+                JSONObject().put("ok", true).put("accepted", true).put("mode", "accessibility")
             }
-            encodeAndPublish(bitmap)
+            // 老机型：拉起系统授权框。用户点「立即开始」之后才真的截，所以这里
+            // 先回一个 mode=projection，网页据此把等待上限放宽（见 lib/screenshot/bridge.ts）。
+            "projection" -> ProjectionCapture.request { bitmap, error ->
+                if (bitmap == null) {
+                    val reason = error ?: "截屏失败"
+                    recordFailure("projection", reason)
+                    publish(JSONObject().put("ok", false).put("reason", reason))
+                } else {
+                    encodeAndPublish(bitmap)
+                }
+            }
+            else -> fail("系统版本太低，截屏需要 Android 11 及以上")
         }
-        return JSONObject().put("ok", true).put("accepted", true)
     }
 
     /** 记住一次成功的截屏（尺寸与体积，不含画面）。 */
@@ -168,21 +202,32 @@ object ScreenshotBridge {
      * 查岗浮层复用它：先拿到图给用户过目，用户点头才编码外发——
      * 「不给」的那条路上，这张位图从头到尾没有变成过 base64。
      *
+     * 走哪条路由 [captureMode] 决定：无障碍优先，老机型回落到系统授权框。
+     *
      * @param onResult 失败时 bitmap 为 null、error 为人话原因；可能同步回调。
      */
     fun captureBitmap(onResult: (Bitmap?, String?) -> Unit) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            onResult(null, "系统版本太低，截屏需要 Android 11 及以上")
-            return
+        when (captureMode()) {
+            "accessibility" -> {
+                if (!captureViaAccessibility(onResult)) {
+                    onResult(null, "无障碍服务没有开启，截屏无法进行")
+                }
+            }
+            "projection" -> ProjectionCapture.request(onResult)
+            else -> onResult(null, "系统版本太低，截屏需要 Android 11 及以上")
         }
-        val svc = service
-        if (svc == null) {
-            onResult(null, "无障碍服务没有开启，截屏无法进行")
-            return
-        }
+    }
+
+    /**
+     * 无障碍直取（Android 11+）。
+     *
+     * @return false 表示当前没有可用的无障碍服务实例，调用方据此换路或报错。
+     */
+    private fun captureViaAccessibility(onResult: (Bitmap?, String?) -> Unit): Boolean {
+        val svc = service ?: return false
         if (capturing) {
             onResult(null, "上一张还没截完，请稍等一下")
-            return
+            return true
         }
         capturing = true
         try {
@@ -207,6 +252,7 @@ object ScreenshotBridge {
             capturing = false
             onResult(null, e.message ?: "发起截屏失败")
         }
+        return true
     }
 
     /** 把 ScreenshotResult 转成软件位图并等比缩小；失败返回 null。 */
@@ -272,6 +318,14 @@ object ScreenshotBridge {
         AccessibilityService.ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY ->
             "屏幕不可用（可能正处在息屏或投屏切换中）"
         else -> "截屏失败（错误码 $errorCode）"
+    }
+
+    /**
+     * 没有等待者的时候（页面刚销毁、回调已被清掉）也要把失败推给网页一次：
+     * 否则网页侧那个 Promise 只能靠超时收场，用户看到的是「转了半天圈」。
+     */
+    fun publishGrabFailure(reason: String) {
+        publish(JSONObject().put("ok", false).put("reason", reason))
     }
 
     private fun publish(payload: JSONObject) {

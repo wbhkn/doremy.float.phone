@@ -27,8 +27,9 @@ android {
         // 1.0.11：截屏与主动查岗（含查岗浮层回复框）；通知栏「直接回复」。
         // 1.0.12：截屏可选收件人；位置感知；睡眠（Health Connect）。
         // 1.0.14：WebView 内补齐 Notification API（映射到原生通知桥）。
-        versionCode 15
-        versionName "1.0.15"
+        // 1.0.17：老机型（Android 10 及以下）改用系统授权框截屏，截屏不再要求 Android 11+。
+        versionCode 17
+        versionName "1.0.17"
         buildConfigField "String", "SITE_URL", "\"${siteUrl}\""
     }
 

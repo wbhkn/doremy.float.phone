@@ -32,6 +32,7 @@ import {
   prepareScreenshotBall,
   readBallHasImage,
   readScreenshotCapabilities,
+  resolveCaptureMode,
   saveScreenshotConfig,
   setScreenshotBallStyle,
   stopScreenshotBall,
@@ -177,9 +178,13 @@ export function ScreenshotSettings({ onNotice }: { onNotice?: (msg: string) => v
 
   const inShell = useMemo(() => isShell(), []);
   const bridgeOk = useMemo(() => hasScreenshotBridge(), []);
-  const supported = caps.supported === true;
+  // 1.0.17 起有两条路：无障碍直取，或每周机型走的系统授权框。
+  // 「能不能用」取决于有没有任何一条路，而不是无障碍开没开。
+  const captureMode = resolveCaptureMode(caps);
+  const supported = captureMode !== "none";
   const accessibilityOn = caps.accessibilityOn === true;
-  const ready = supported && accessibilityOn && bridgeOk;
+  const projection = captureMode === "projection";
+  const ready = supported && bridgeOk;
 
   const update = useCallback((patch: Partial<ScreenshotConfig>) => {
     const next = { ...loadScreenshotConfig(), ...patch };
@@ -195,13 +200,17 @@ export function ScreenshotSettings({ onNotice }: { onNotice?: (msg: string) => v
       return;
     }
     if (!supported) {
-      onNotice?.("系统版本太低，截屏需要 Android 11 及以上");
+      onNotice?.("这台手机没有可用的截屏通道");
+      return;
+    }
+    if (captureMode === "projection") {
+      onNotice?.("这台手机每次截屏都会弹一次系统授权框，点「立即开始」才算截到");
       return;
     }
     if (!accessibilityOn) {
       onNotice?.("还需要开启无障碍服务，截屏才能真正工作");
     }
-  }, [update, onNotice, bridgeOk, supported, accessibilityOn]);
+  }, [update, onNotice, bridgeOk, supported, captureMode, accessibilityOn]);
 
   const doTest = useCallback(async () => {
     if (busy) return;
@@ -679,23 +688,27 @@ export function ScreenshotSettings({ onNotice }: { onNotice?: (msg: string) => v
           )}
         </div>
 
-        {/* 无障碍：截屏的真正前提 */}
+        {/* 无障碍：Android 11+ 的截屏前提；老机型走系统授权框，不需要它 */}
         <div>
-          <div className="settings-menu-section-title">无障碍服务</div>
+          <div className="settings-menu-section-title">
+            {projection ? "截屏授权方式" : "无障碍服务"}
+          </div>
           <div className="menu-group" style={{ marginTop: 10 }}>
             <div className="menu-item" style={{ cursor: "default" }}>
               <div className="menu-icon" style={{ background: "color-mix(in srgb, var(--per-accent, #6f5bd6) 14%, transparent)" }}>
                 <ShieldCheck size={17} strokeWidth={1.8} />
               </div>
               <div className="menu-label-group">
-                <span className="menu-label">截屏权限来源</span>
+                <span className="menu-label">{projection ? "系统授权框" : "截屏权限来源"}</span>
                 <span className="menu-desc">
-                  {accessibilityOn
-                    ? "无障碍服务已开启，截屏可以工作"
-                    : "需要开启无障碍服务。截屏用的是系统给无障碍的能力，不会因此多要一个录屏授权框"}
+                  {projection
+                    ? "这台手机的系统版本没有无障碍直取画面，改用系统自带的截屏授权：每次点「看一眼屏幕」都会弹一次授权框，你点「立即开始」才截一张。不用开无障碍。"
+                    : accessibilityOn
+                      ? "无障碍服务已开启，截屏可以工作"
+                      : "需要开启无障碍服务。截屏用的是系统给无障碍的能力，不会因此多要一个录屏授权框"}
                 </span>
               </div>
-              {!accessibilityOn && (
+              {!projection && !accessibilityOn && (
                 <button
                   type="button"
                   className="ui-btn ui-btn-outline"
