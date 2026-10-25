@@ -2337,7 +2337,8 @@ function BilibiliShareBubble({ msg }: { msg: ChatMessage }) {
     const duration = data?.biliDuration || "";
     const view = Number(data?.biliView) || 0;
     const pending = Boolean(data?.biliPending) && !title;
-    const url = bvid ? `https://www.bilibili.com/video/${bvid}` : "";
+    // 短链没解析出 BV 时，用原始链接兜底，卡片照样能点开
+    const url = bvid ? `https://www.bilibili.com/video/${bvid}` : data?.biliLink || "";
 
     const openVideo = () => {
         if (!url) return;

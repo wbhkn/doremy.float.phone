@@ -225,6 +225,7 @@ export type ChatMessage = {
         biliDuration?: string;    // 时长，如 03:21
         biliView?: number;        // 播放量（原始数字，渲染时再格式化）
         biliPending?: boolean;    // 正在取视频信息（先出气泡，数据到了再填）
+        biliLink?: string;        // 原始链接（短链拿不到 BV 时也能点开）
         xiaohongshuAuthor?: string;       // 小红书分享作者
         xiaohongshuTitle?: string;        // 小红书分享标题
         xiaohongshuBody?: string;         // 小红书分享正文

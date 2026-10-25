@@ -211,6 +211,56 @@ async function fetchViewRaw(bvid: string): Promise<Record<string, unknown>> {
     return (json.data || {}) as Record<string, unknown>;
 }
 
+/**
+ * 网页兜底：直接抓视频页的 OG 标签。
+ *
+ * 为什么需要：`/x/web-interface/view` 对机房 IP 很敏感，Vercel 出口经常被判风控
+ * （popular/search 却照常），结果就是「分享出去只剩一行裸链接」。
+ * 视频页 HTML 里的 og:title / og:image / og:description 一样是真实数据，
+ * 而且 www.bilibili.com 这条链路宽松得多，所以拿不到 API 时改走这里。
+ */
+async function fetchWebCard(bvid: string): Promise<Record<string, unknown> | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+        const res = await schedule(() =>
+            fetch(`https://www.bilibili.com/video/${encodeURIComponent(bvid)}/`, {
+                headers: { "User-Agent": UA },
+                cache: "no-store",
+                signal: controller.signal,
+            }),
+        );
+        if (!res.ok) return null;
+        const html = await res.text();
+        const meta = (property: string): string => {
+            const re = new RegExp(
+                `<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']*)`,
+                "i",
+            );
+            return (html.match(re) || [])[1] || "";
+        };
+        const title = meta("og:title").replace(/_哔哩哔哩.*$/i, "").trim();
+        if (!title) return null;
+        const aidMatch = html.match(/"aid":(\d{5,})/) || html.match(/av(\d{5,})/);
+        const cidMatch = html.match(/"cid":(\d{5,})/);
+        return {
+            aid: aidMatch ? num(aidMatch[1]) : 0,
+            cid: cidMatch ? num(cidMatch[1]) : 0,
+            title,
+            pic: meta("og:image").replace(/^http:/, "https:"),
+            desc: meta("og:description").trim(),
+            owner: {},
+            stat: {},
+            duration: 0,
+            pages: [],
+        };
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function actionFeed(query: Record<string, string>): Promise<BiliActionResult> {
     const ps = Math.min(Math.max(num(query.ps) || 6, 1), 20);
     const freshIdx = Math.max(num(query.fresh_idx) || 1, 1);
@@ -301,7 +351,24 @@ async function actionSearch(query: Record<string, string>): Promise<BiliActionRe
 async function actionVideo(query: Record<string, string>): Promise<BiliActionResult> {
     const bvid = trim(query.bvid, 20);
     if (!bvid) return { ok: false, action: "video", reason: "bad_request", message: "缺少 bvid" };
-    const data = await fetchViewRaw(bvid);
+    let data: Record<string, unknown>;
+    let partial = false;
+    try {
+        data = await fetchViewRaw(bvid);
+    } catch {
+        // API 被风控时退回网页 OG 标签：标题和封面照样是真的，只是没有播放数/时长
+        const fallback = await fetchWebCard(bvid);
+        if (!fallback) {
+            return {
+                ok: false,
+                action: "video",
+                reason: "risk_control",
+                message: "B 站这次没让看（接口和网页都被拦了），过一会儿再试",
+            };
+        }
+        data = fallback;
+        partial = true;
+    }
     const stat = (data.stat || {}) as Record<string, unknown>;
     const owner = (data.owner || {}) as Record<string, unknown>;
     const pages = (data.pages || []) as Record<string, unknown>[];
@@ -341,6 +408,7 @@ async function actionVideo(query: Record<string, string>): Promise<BiliActionRes
         tags,
         pages: pages.length,
         link: `https://www.bilibili.com/video/${bvid}`,
+        ...(partial ? { partial: true } : {}),
     };
 }
 
@@ -348,8 +416,14 @@ async function actionComments(query: Record<string, string>): Promise<BiliAction
     let aid = num(query.aid);
     const bvid = trim(query.bvid, 20);
     if (!aid && bvid) {
-        const view = await fetchViewRaw(bvid);
-        aid = num(view.aid);
+        try {
+            const view = await fetchViewRaw(bvid);
+            aid = num(view.aid);
+        } catch {
+            // 详情接口被风控时从网页里挖 aid，评论照样能看
+            const card = await fetchWebCard(bvid);
+            aid = num(card?.aid);
+        }
     }
     if (!aid) return { ok: false, action: "comments", reason: "bad_request", message: "缺少 bvid 或 aid" };
     const { json } = await biliJson(

@@ -736,6 +736,25 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         });
     }, []);
 
+    // 已经停在聊天页时又分享进来一条：同样只塞进输入框，不自动发送。
+    useEffect(() => {
+        const onShare = (event: Event) => {
+            const text = (event as CustomEvent<{ text?: string }>).detail?.text?.trim();
+            if (!text) return;
+            clearIncomingShare();
+            setInputText(prev => (prev.trim() ? `${prev}\n${text}` : text));
+            requestAnimationFrame(() => {
+                const ta = textareaRef.current;
+                if (!ta) return;
+                ta.style.height = "auto";
+                ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+                ta.focus();
+            });
+        };
+        window.addEventListener("float-incoming-share", onShare);
+        return () => window.removeEventListener("float-incoming-share", onShare);
+    }, []);
+
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
     // 围观群/被禁言：输入与富媒体入口全部锁定，只留线下切换和生成按钮
@@ -4188,9 +4207,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             if (biliLink) {
                 void buildBiliCardFromText(currentText).then(card => {
                     if (!card) {
-                        // 取不到就退回普通文字气泡，别让用户发出去一条空卡
-                        updateMessageMediaData(newMsg.id, undefined);
-                        setMessages(prev => prev.map(m => (m.id === newMsg.id ? { ...m, mediaType: undefined, mediaData: undefined } : m)));
+                        // 取不到真实信息（B 站风控/网络）：仍然留一张「只有标题和链接」的卡，
+                        // 不要退化成裸链接——裸链接在聊天里连点都点不开，也不好看。
+                        const guessed = currentText
+                            .replace(biliLink, " ")
+                            .split("\n")[0]
+                            .replace(/\s+/g, " ")
+                            .trim()
+                            .slice(0, 60);
+                        const fallbackData = {
+                            biliPending: false,
+                            biliBvid: (biliLink.match(/BV[0-9A-Za-z]{10}/) || [""])[0],
+                            biliLink,
+                            biliTitle: guessed || "B 站视频",
+                            label: guessed || "B 站视频",
+                        };
+                        updateMessageMediaData(newMsg.id, fallbackData);
+                        setMessages(prev => prev.map(m => (m.id === newMsg.id ? { ...m, mediaData: fallbackData } : m)));
                         return;
                     }
                     const mediaData = {
