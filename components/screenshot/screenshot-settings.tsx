@@ -783,7 +783,11 @@ export function ScreenshotSettings({ onNotice }: { onNotice?: (msg: string) => v
                     ? "不在小手机 App 内，装到手机上才能截屏"
                     : projection
                       ? "系统授权截屏：每次点「看一眼屏幕」弹一次授权框"
-                      : "无障碍直取：系统版本支持，开启无障碍服务即可"}
+                      : supported
+                        ? "无障碍直取：系统版本支持，开启无障碍服务即可"
+                        // 安卓 10 及以下没有无障碍截屏；老壳又没有系统授权通道，
+                        // 这时说「系统版本支持」会让人以为是自己没开无障碍。
+                        : "这台手机没有可用的截屏通道：安卓壳版本过旧，更新到 1.0.17+ 才有系统授权截屏"}
                 </span>
               </div>
             </div>
@@ -857,6 +861,9 @@ export function ScreenshotSettings({ onNotice }: { onNotice?: (msg: string) => v
 
         {/* 确认浮层的外观：查岗与主动截屏共用同一条浮层，故配色也共用一份 */}
         <CheckInThemeSettings />
+
+        {/* 截屏/查岗诊断：截不到的时候让用户自己看出卡在哪一环 */}
+        <ScreenshotDiagnosticsPanel onNotice={onNotice} />
 
         <div className="per-note" style={{ padding: "0 var(--ui-padding, 16px)" }}>
           角色要用截屏能力，还要单独开能力：工具箱 → 内置能力。
