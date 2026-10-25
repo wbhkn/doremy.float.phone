@@ -23,6 +23,7 @@ import {
 } from "./tool-storage";
 import { executeCustomAppToolCall } from "./custom-app-tool-runtime";
 import { characterWorkspace, agentComputerRequest, isAgentComputerConfigured } from "./agent-computer";
+import { BILIBILI_BROWSE_CAPABILITY_ID, biliApiCall, biliUserNotice, formatBiliResult } from "./bilibili-tool";
 import { AGENT_COMPUTER_CAPABILITY_ID, CHECK_IN_REQUEST_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, DEVICE_ACTION_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, PERCEPTION_READ_CAPABILITY_ID, PHONE_WIDGET_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, SYSTEM_CALENDAR_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
 import {
     checkQueryCooldown,
@@ -813,6 +814,7 @@ async function executeInternalTool(call: ToolCall, context?: ToolExecutionContex
     if (isToolboxManagementToolName(call.name)) return executeToolboxManagementTool(call);
     if (call.name === "发送文件") return executeSendFileTool(call);
     if (call.name === "角色电脑") return executeAgentComputerTool(call, context);
+    if (call.name === "刷B站") return executeBilibiliTool(call, context);
     // 内置工具必须排在用户自定义的现实桥动作**之前**：
     // 用户完全可能把快捷动作也命名成「查看手机状态」，若让现实桥先匹配，
     // 内置工具就永远调不到（被同名的用户动作影子覆盖），而且表现是
@@ -2590,6 +2592,77 @@ function dispatchCalendarUpdated(): void {
     if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("calendar-updated"));
     }
+}
+
+// ── 刷B站（角色自己上哔哩哔哩看视频）───────────────
+
+/**
+ * 角色「刷B站」：只读浏览公开数据。
+ *
+ * 为什么走 /api/bili 而不是直连：api.bilibili.com 不返回 CORS 头，
+ * 浏览器/WebView 里 fetch 一定被拦；而且 search 需要 wbi 签名（md5，
+ * 浏览器端没有现成实现）。所以统一由同源代理代取。
+ */
+async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContext): Promise<ToolResult> {
+    const failed = (error: string, userNotice?: string): ToolResult => ({
+        name: call.name,
+        success: false,
+        error,
+        continueConversation: false,
+        persistToHistory: false,
+        userNotice,
+    });
+
+    const capability = getInternalCapability(BILIBILI_BROWSE_CAPABILITY_ID);
+    if (!capability || !capability.enabled || capability.mode === "off") {
+        return failed("刷B站能力未启用（设置 → 工具箱 → 内置能力）");
+    }
+    if (!isSupportedChatToolContext(context)) return failed("当前场景暂不支持刷B站");
+
+    const args = (call.args || {}) as Record<string, unknown>;
+    const action = String(args.action ?? "").trim().toLowerCase();
+    const params: Record<string, string | number> = {};
+    const bvid = String(args.bvid ?? "").trim();
+
+    if (action === "popular") {
+        if (Number(args.ps)) params.ps = Math.min(Math.max(Number(args.ps), 1), 20);
+    } else if (action === "ranking") {
+        if (args.rid !== undefined) params.rid = Number(args.rid) || 0;
+        if (Number(args.ps)) params.ps = Math.min(Math.max(Number(args.ps), 1), 20);
+    } else if (action === "search") {
+        const keyword = String(args.keyword ?? "").trim();
+        if (!keyword) return failed("搜视频得给一个关键词（keyword）");
+        params.keyword = keyword;
+        if (Number(args.page)) params.page = Math.max(Number(args.page), 1);
+    } else if (action === "video" || action === "comments" || action === "related" || action === "online") {
+        if (!bvid) return failed("需要视频号 bvid（BV 开头）");
+        params.bvid = bvid;
+    } else if (action === "user") {
+        const mid = String(args.mid ?? "").trim();
+        if (!mid) return failed("看 UP 主主页需要 mid（视频详情里的 up_mid）");
+        params.mid = mid;
+    } else {
+        return failed("action 只能是 popular / ranking / search / video / comments / related / online / user");
+    }
+
+    const response = await biliApiCall(action, params);
+    if (!response.ok) {
+        const reason = String(response.reason || "");
+        const message = String(response.message || "没能从 B 站拿到数据");
+        return failed(
+            reason ? `${message}（${reason}）` : message,
+            reason === "risk_control" ? "📺 B 站这次没让看，换个方向试试" : undefined,
+        );
+    }
+
+    return {
+        name: call.name,
+        success: true,
+        data: formatBiliResult(action, response),
+        continueConversation: true,
+        persistToHistory: false,
+        userNotice: biliUserNotice(action, response, args),
+    };
 }
 
 // ── 角色电脑（角色自己的云端小电脑）───────────────

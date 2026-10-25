@@ -1,5 +1,6 @@
 import type { InternalCapabilityConfig } from "./settings-types";
 import { isAgentComputerConfigured, isContainerComputer } from "./agent-computer";
+import { BILIBILI_BROWSE_CAPABILITY_ID, BILIBILI_PARAMETER_SCHEMA, BILIBILI_USAGE_GUIDE } from "./bilibili-tool";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { loadBridgeDataItems, loadBridgeShortcutActions, parseBridgeActionParameterSchema } from "./reality-bridge/storage";
 
@@ -34,6 +35,7 @@ export const CHECK_IN_REQUEST_CAPABILITY_ID = "check_in_request";
 export const RESERVED_INTERNAL_TOOL_NAMES: string[] = [
     "在桌面留句话",
     "请求看屏幕",
+    "刷B站",
     "查看手机状态",
     "操作手机设备",
     "查看系统日程",
@@ -1403,6 +1405,16 @@ const BUILTIN_INTERNAL_CAPABILITIES: InternalCapabilityConfig[] = [
         createdAt: 0,
         updatedAt: 0,
     },
+    {
+        id: BILIBILI_BROWSE_CAPABILITY_ID,
+        name: "刷B站",
+        description:
+            "你能自己上哔哩哔哩刷视频：看热门、看排行榜、搜视频、点开某条视频看详情和简介、翻评论区、顺着相关推荐一路往下看。只读——不登录、不点赞、不投币、不发评论。",
+        enabled: true,
+        mode: "auto",
+        createdAt: 0,
+        updatedAt: 0,
+    },
 ];
 
 export function loadInternalCapabilities(): InternalCapabilityConfig[] {
@@ -1474,6 +1486,14 @@ export function getInternalCapabilityToolDefinition(capability: InternalCapabili
             description: capability.description,
             parameterSchema: AGENT_COMPUTER_PARAMETER_SCHEMA,
             usageGuide: buildAgentComputerUsageGuide(),
+        };
+    }
+    if (capability.id === BILIBILI_BROWSE_CAPABILITY_ID) {
+        return {
+            name: capability.name,
+            description: capability.description,
+            parameterSchema: BILIBILI_PARAMETER_SCHEMA,
+            usageGuide: BILIBILI_USAGE_GUIDE,
         };
     }
     if (capability.id === SEND_FILE_CAPABILITY_ID) {

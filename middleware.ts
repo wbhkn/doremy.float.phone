@@ -18,6 +18,9 @@ const PUBLIC_ROUTE_PREFIXES = [
   // 个人云的离线生成把「代发触发邮件」外包给站点，同样没有登录 cookie，
   // 凭 bridge_token 认账号（见该路由内的说明）。
   "/api/push/shortcut-commands/deliver-email/",
+  // 刷B站的代理：只转 B 站公开数据（热门/排行/搜索/视频详情/评论），
+  // 不带任何用户信息，所以放行；保留登录才能用反而会让角色的请求失败。
+  "/api/bili/",
 ];
 
 const STATIC_ROUTE_PREFIXES = [
