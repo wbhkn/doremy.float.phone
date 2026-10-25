@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         val SITE_URL: String = BuildConfig.SITE_URL
-        const val VERSION = "1.0.15"
+        const val VERSION = "1.0.16"
         /** 来电接听等场景的站内深链（必须以 SITE_URL 开头，否则忽略） */
         const val EXTRA_OPEN_URL = "open_url"
         /** 外部 App（如桌宠）唤起本壳用的自定义 scheme：floatshell://open?url=<站内地址> */
@@ -148,6 +148,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var rootContainer: FrameLayout
     private lateinit var webView: WebView
+    /** 外部 App「分享到噼里啪啦」带进来的内容（JSON 字符串），网页取走后清空 */
+    private var pendingShare: String? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     /** 系统状态栏实际高度（CSS px，即物理像素 / density），实时更新。 */
@@ -469,6 +471,8 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        // 冷启动：先取出外部分享，再按深链/首页加载
+        pendingShare = consumeShare(intent)
         // 冷启动带深链（如来电接听）直接加载目标；否则加载首页
         webView.loadUrl(consumeOpenUrl(intent) ?: SITE_URL)
         ensurePushService()
@@ -478,9 +482,37 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        val shared = consumeShare(intent)
+        if (shared != null) {
+            pendingShare = shared
+            runCatching {
+                webView.evaluateJavascript("window.__floatShare && window.__floatShare(" + org.json.JSONObject.quote(shared) + ")", null)
+            }
+        }
         val target = consumeOpenUrl(intent) ?: return
         // SPA 已加载：loadUrl 到同页 hash 只触发 hashchange，不会整页重载
         webView.loadUrl(target)
+    }
+
+    /**
+     * 取出外部 App 通过系统分享面板发来的内容。
+     * 支持的字段：EXTRA_TEXT（文字/链接）、EXTRA_STREAM（图片/视频的 content:// 或 file://）。
+     * 返回 JSON 字符串（text/uri/mime），没有内容则返回 null。
+     */
+    private fun consumeShare(intent: Intent?): String? {
+        if (intent == null) return null
+        if (intent.action != Intent.ACTION_SEND) return null
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+        val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty()
+        val stream = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+        val mime = intent.type.orEmpty()
+        if (text.isBlank() && stream == null) return null
+        val jo = org.json.JSONObject()
+        jo.put("text", text)
+        jo.put("subject", subject)
+        jo.put("uri", stream?.toString().orEmpty())
+        jo.put("mime", mime)
+        return jo.toString()
     }
 
     /**
@@ -647,6 +679,14 @@ class MainActivity : AppCompatActivity() {
     inner class ShellBridge {
         @JavascriptInterface
         fun getVersion(): String = VERSION
+
+        /** 外部 App 分享进来的内容（JSON），取走后清空；没有则返回空串。 */
+        @JavascriptInterface
+        fun getShare(): String {
+            val v = pendingShare ?: return ""
+            pendingShare = null
+            return v
+        }
 
         /**
          * 系统层面「本站通知」是否被允许。
