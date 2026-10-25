@@ -54,6 +54,88 @@
         }),
     );
 
+  // ── 读小手机里的东西（同一个 origin，直接读它的 kv 库）──
+  // 小手机的设置都存在 Dexie 库 AiPhoneKvDB / entries 里，值是 JSON 字符串。
+  const PHONE_DB = "AiPhoneKvDB";
+  function phoneHasDb() {
+    return new Promise((resolve) => {
+      try {
+        const api = indexedDB.databases;
+        if (typeof api !== "function") return resolve(true);
+        api
+          .call(indexedDB)
+          .then((list) => resolve((list || []).some((d) => d && d.name === PHONE_DB)))
+          .catch(() => resolve(true));
+      } catch (e) {
+        resolve(true);
+      }
+    });
+  }
+  function phoneKvGet(key) {
+    return phoneHasDb().then(
+      (exists) =>
+        new Promise((resolve) => {
+          if (!exists) return resolve(null);
+          let req;
+          try {
+            req = indexedDB.open(PHONE_DB);
+          } catch (e) {
+            return resolve(null);
+          }
+          req.onerror = () => resolve(null);
+          req.onupgradeneeded = () => {
+            // 库还不存在时，别替小手机建一个残缺的库
+            try {
+              req.transaction && req.transaction.abort();
+            } catch (e) {
+              /* ignore */
+            }
+          };
+          req.onsuccess = () => {
+            const db = req.result;
+            try {
+              if (!db.objectStoreNames.contains("entries")) {
+                db.close();
+                return resolve(null);
+              }
+              const g = db.transaction("entries", "readonly").objectStore("entries").get(key);
+              g.onerror = () => {
+                db.close();
+                resolve(null);
+              };
+              g.onsuccess = () => {
+                db.close();
+                const row = g.result;
+                if (!row || typeof row.value !== "string") return resolve(null);
+                try {
+                  resolve(JSON.parse(row.value));
+                } catch (e) {
+                  resolve(null);
+                }
+              };
+            } catch (e) {
+              try {
+                db.close();
+              } catch (err) {
+                /* ignore */
+              }
+              resolve(null);
+            }
+          };
+        }),
+    );
+  }
+
+  // 音色预设：名字给用户看，id 同时是 MiniMax 的 voice_id 和系统朗读的 pitch 兜底
+  const VOICE_PRESETS = [
+    { id: "cute_boy", name: "正太音", pitch: 1.45, rate: 1.05 },
+    { id: "chunzhen_xuedi", name: "少年音", pitch: 1.18, rate: 1.0 },
+    { id: "male-qn-qingse", name: "青年音", pitch: 0.95, rate: 1.0 },
+    { id: "female-shaonv", name: "少女音", pitch: 1.3, rate: 1.02 },
+  ];
+  let phoneVoice = null; // { apiKey, baseUrl, model }
+  let phoneCharacterCount = 0;
+
   const store = {
     allBooks: () => tx("books", "readonly", (s) => s.getAll()).then((r) => r || []),
     getBook: (id) => tx("books", "readonly", (s) => s.get(id)),
@@ -76,8 +158,9 @@
     activeCharacterId: "",
     llm: { base: "", key: "", model: "" },
     tts: {
-      base: "http://127.0.0.1:9880",
+      base: "",
       speed: 1,
+      presetId: "female-shaonv",
       voices: [],
       activeVoiceId: "",
     },
@@ -109,6 +192,69 @@
     S.characters.find((c) => c.id === S.activeCharacterId) || S.characters[0] || null;
   const activeVoice = () =>
     S.tts.voices.find((v) => v.id === S.tts.activeVoiceId) || S.tts.voices[0] || null;
+  const activePreset = () =>
+    VOICE_PRESETS.find((v) => v.id === S.tts.presetId) || VOICE_PRESETS[3];
+
+  /** 该用哪条听书通道：小手机里的 MiniMax → 手机系统朗读 → 自己的 GPT-SoVITS */
+  function ttsEngine() {
+    if (phoneVoice && phoneVoice.apiKey) return "phone";
+    if (typeof window.speechSynthesis === "function") return "system";
+    if (S.tts.base && !/127\.0\.0\.1|localhost/i.test(S.tts.base)) return "gts";
+    return "none";
+  }
+  function engineLabel() {
+    const e = ttsEngine();
+    if (e === "phone") return "小手机里的语音（MiniMax）";
+    if (e === "system") return "手机系统朗读（没找到 MiniMax 配置）";
+    if (e === "gts") return "自己的 GPT-SoVITS";
+    return "没有可用的朗读通道";
+  }
+
+  /**
+   * 把手机里的角色人设、语音配置读过来。
+   * 小手机把设置都存进同一个 IndexedDB，浮读跟它同源，直接读就行——
+   * 用户在「角色」里写的人设，这里不用再抄一遍。
+   */
+  async function syncPhoneData() {
+    try {
+      const chars = await phoneKvGet("ai_phone_characters_v1");
+      const list = Array.isArray(chars) ? chars : Array.isArray(chars?.characters) ? chars.characters : [];
+      if (list.length) {
+        phoneCharacterCount = list.length;
+        S.characters = list
+          .filter((c) => c && (c.name || c.id))
+          .map((c) => ({
+            id: String(c.id || c.name),
+            name: String(c.name || "角色"),
+            avatar: String(c.avatar || ""),
+            persona: String(c.persona || ""),
+            personality: String(c.personality || ""),
+          }));
+        if (!S.characters.some((c) => c.id === S.activeCharacterId)) {
+          S.activeCharacterId = S.characters[0].id;
+        }
+        saveSettings();
+      }
+    } catch (e) {
+      /* 读不到就用浮读自己的角色 */
+    }
+    try {
+      const configs = await phoneKvGet("ai_phone_voice_configs_v1");
+      const arr = Array.isArray(configs) ? configs : Array.isArray(configs?.configs) ? configs.configs : [];
+      const usable = arr.find(
+        (c) => c && String(c.provider || "").toLowerCase().includes("minimax") && String(c.apiKey || "").trim(),
+      );
+      if (usable) {
+        phoneVoice = {
+          apiKey: String(usable.apiKey).trim(),
+          baseUrl: String(usable.baseUrl || "https://api.minimaxi.com/v1").trim(),
+          model: String(usable.model || "speech-2.8-turbo").trim(),
+        };
+      }
+    } catch (e) {
+      /* 没配语音就退回系统朗读 */
+    }
+  }
 
   // ────────────────────────────── 文件解析 ──────────────────────────────
   const CH_RE = /^\s*(?:第[零一二三四五六七八九十百千万两0-9０-９]+[章回节卷篇](?:[^\n]{0,40})?|Chapter\s+[0-9]+[^\n]{0,40}|序章[^\n]{0,40}|楔子[^\n]{0,20})\s*$/i;
@@ -429,15 +575,15 @@
     const c = activeCharacter();
     const llmOk = !!(S.llm && S.llm.base && S.llm.key && S.llm.model);
     $("llmState").textContent = llmOk ? "已配置" : "未配置";
-    const ttsBase = String((S.tts && S.tts.base) || "");
-    const ttsReady = !!ttsBase && !/127\.0\.0\.1|localhost/i.test(ttsBase);
-    $("ttsState").textContent = ttsReady ? "已配置" : "未配置";
+    const engine = ttsEngine();
+    if ($("ttsState")) $("ttsState").textContent = engine === "phone" ? "已配置" : engine === "system" ? "系统朗读" : engine === "gts" ? "自建" : "未配置";
+    if ($("ttsEngineState")) $("ttsEngineState").textContent = engineLabel();
     $("charState").textContent = c ? c.name : "还没有";
-    const v = (S.tts.voices || []).find((x) => x.id === S.tts.activeVoiceId) || (S.tts.voices || [])[0];
+    const preset = activePreset();
     $("meStatus").innerHTML = `<div class="me-status">
       <b>${books.length}</b> 本书 · <b>${Object.keys(progressAll).length}</b> 本读过<br />
       当前角色：<b>${esc(c ? c.name : "还没选")}</b><br />
-      听书音色：<b>${esc(v ? v.name : "未设置")}</b>
+      听书音色：<b>${esc(preset.name)}</b> · ${esc(engineLabel())}
     </div>`;
     document.querySelectorAll("#meView .row-theme button").forEach((b) => b.classList.toggle("active", b.dataset.theme === (S.theme || "jinjiang")));
   }
@@ -772,6 +918,119 @@
     return `${base}/tts?${q.toString()}`;
   }
 
+  function splitSpeech(text, max) {
+    const raw = String(text || "").replace(/\s+/g, " ").trim();
+    if (!raw) return [];
+    const pieces = raw.match(/[^。！？!?；;…]+[。！？!?；;…]?/g) || [raw];
+    const out = [];
+    let buf = "";
+    for (const p of pieces) {
+      const piece = p.trim();
+      if (!piece) continue;
+      if (!buf) buf = piece;
+      else if ((buf + piece).length <= max) buf += piece;
+      else {
+        out.push(buf);
+        buf = piece;
+      }
+      while (buf.length > max) {
+        out.push(buf.slice(0, max));
+        buf = buf.slice(max);
+      }
+    }
+    if (buf.trim()) out.push(buf);
+    return out;
+  }
+
+  function speakWithSystem(text, preset) {
+    return new Promise((resolve, reject) => {
+      if (typeof window.speechSynthesis !== "function") return reject(new Error("这台手机没有系统朗读"));
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "zh-CN";
+      const speed = Number(S.tts.speed) || 1;
+      u.rate = Math.min(2, Math.max(0.5, speed * (preset?.rate || 1)));
+      u.pitch = Math.min(2, Math.max(0.5, preset?.pitch || 1));
+      u.onend = () => resolve();
+      u.onerror = (ev) => reject(new Error(ev && ev.error ? `系统朗读失败（${ev.error}）` : "系统朗读失败"));
+      window.speechSynthesis.speak(u);
+    });
+  }
+
+  async function speakWithPhone(text, preset, token) {
+    const resp = await fetch("/api/reader-tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        apiKey: phoneVoice.apiKey,
+        baseUrl: phoneVoice.baseUrl,
+        model: phoneVoice.model,
+        voiceId: preset.id,
+        speed: Number(S.tts.speed) || 1,
+      }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.error || `语音接口 ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    if (token !== ttsToken) return;
+    const url = URL.createObjectURL(blob);
+    try {
+      await new Promise((resolve, reject) => {
+        audio.onended = () => resolve();
+        audio.onerror = () => reject(new Error("音频播放失败"));
+        audio.src = url;
+        audio.playbackRate = 1;
+        audio.play().then(() => undefined, reject);
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+      audio.onended = null;
+      audio.onerror = null;
+    }
+  }
+
+  async function speakWithGts(text) {
+    const url = ttsUrl(text);
+    try {
+      await new Promise((resolve, reject) => {
+        audio.onended = () => resolve();
+        audio.onerror = () => reject(new Error("语音服务没响应"));
+        audio.src = url;
+        audio.play().then(() => undefined, reject);
+      });
+    } finally {
+      audio.onended = null;
+      audio.onerror = null;
+    }
+  }
+
+  async function speakParagraph(text, token) {
+    const engine = ttsEngine();
+    const preset = activePreset();
+    const chunks = splitSpeech(text, engine === "phone" ? 320 : 500);
+    if (!chunks.length) return;
+    let fellBack = false;
+    for (const chunk of chunks) {
+      if (token !== ttsToken || !playing) return;
+      if (engine === "phone") {
+        try {
+          await speakWithPhone(chunk, preset, token);
+        } catch (e) {
+          // 小手机里的语音挂了（没网 / 余额 / 密钥过期）就退回系统朗读，别让听书中断
+          if (!fellBack) {
+            fellBack = true;
+            toast("语音服务没响应，先用手机自带朗读接着读", 3000);
+          }
+          await speakWithSystem(chunk, preset);
+        }
+      } else if (engine === "system") await speakWithSystem(chunk, preset);
+      else if (engine === "gts") await speakWithGts(chunk);
+      else throw new Error("没有可用的朗读通道");
+    }
+  }
+
   async function playAt(idx) {
     if (!book) return;
     const ch = book.chapters[chIdx];
@@ -781,7 +1040,8 @@
       return;
     }
     playIdx = idx;
-    const text = ch.paragraphs[idx].slice(0, 600);
+    lastParagraphIdx = idx;
+    const text = String(ch.paragraphs[idx] || "").slice(0, 1200);
     const token = ++ttsToken;
     document.querySelectorAll(".para.playing").forEach((p) => p.classList.remove("playing"));
     const node = document.querySelector(`.para[data-i="${idx}"]`);
@@ -789,15 +1049,14 @@
       node.classList.add("playing");
       node.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-    $("abText").textContent = `第 ${idx + 1} 段 · 合成中…`;
+    playing = true;
+    $("abPlay").textContent = "⏸";
+    $("abText").textContent = `第 ${idx + 1} 段 · 准备中…`;
     try {
-      const url = ttsUrl(text);
-      audio.src = url;
-      audio.playbackRate = 1;
-      await audio.play();
-      playing = true;
-      $("abPlay").textContent = "⏸";
-      $("abText").textContent = `第 ${idx + 1} 段 · 正在读`;
+      await speakParagraph(text, token);
+      if (token !== ttsToken || !playing) return;
+      $("abText").textContent = `第 ${idx + 1} 段 · 读完了`;
+      playAt(idx + 1);
     } catch (e) {
       if (token !== ttsToken) return;
       // 自动播放被系统拦下时，不要报「失败」——等用户点一下播放键就行
@@ -808,24 +1067,15 @@
         toast("点一下播放键就能听", 2200);
         return;
       }
+      playing = false;
+      $("abPlay").textContent = "▶";
       $("abText").textContent = `第 ${idx + 1} 段 · 失败`;
-      toast(`朗读失败：${e.message || e}`, 3200);
+      toast(`朗读失败：${(e && e.message) || e}`, 3400);
     }
   }
 
-  audio.addEventListener("ended", () => {
-    if (!playing) return;
-    playAt(playIdx + 1);
-  });
-  audio.addEventListener("error", () => {
-    if (!playing) return;
-    playing = false;
-    $("abPlay").textContent = "▶";
-    toast("语音服务没响应：检查电脑上的 GPT-SoVITS 和局域网地址", 3200);
-  });
-
   function startAudio(fromIdx) {
-    if (!S.tts.base) return toast("先填语音服务地址");
+    if (ttsEngine() === "none") return toast("这台手机没有可用的朗读通道");
     playing = true;
     $("audioBar").classList.remove("hidden");
     playAt(fromIdx == null ? lastParagraphIdx : fromIdx);
@@ -836,7 +1086,12 @@
     try {
       audio.pause();
     } catch (e) {}
+    audio.onended = null;
+    audio.onerror = null;
     audio.removeAttribute("src");
+    try {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    } catch (e) {}
     $("abPlay").textContent = "▶";
     document.querySelectorAll(".para.playing").forEach((p) => p.classList.remove("playing"));
   }
@@ -917,10 +1172,30 @@
     $("btnBuddyAnnotate").style.display = c ? "" : "none";
   }
   function renderVoices() {
+    // 1) 音色预设（默认就走这条，打开书就能听）
+    const presetBox = $("presetVoices");
+    if (presetBox) {
+      presetBox.innerHTML = "";
+      const activeId = (activePreset() || {}).id;
+      VOICE_PRESETS.forEach((p) => {
+        const b = el("button", p.id === activeId ? "active" : "", esc(p.name));
+        b.addEventListener("click", () => {
+          S.tts.presetId = p.id;
+          saveSettings();
+          renderVoices();
+          renderMe();
+          toast(`换成${p.name}了`, 1500);
+        });
+        presetBox.appendChild(b);
+      });
+    }
+    if ($("ttsEngineHint")) $("ttsEngineHint").textContent = `当前：${engineLabel()}`;
+
+    // 2) 自建音色（GPT-SoVITS 参考音频）
     const seg = $("segVoice");
     seg.innerHTML = "";
     if (!S.tts.voices.length) {
-      seg.innerHTML = `<span style="font-size:12.5px;color:var(--muted)">还没有音色，下面填一个再保存</span>`;
+      seg.innerHTML = `<span style="font-size:12.5px;color:var(--muted)">没有也行，上面四个预设够用</span>`;
       return;
     }
     S.tts.voices.forEach((v) => {
@@ -1231,6 +1506,8 @@
   // ────────────────────────────── 启动 ──────────────────────────────
   async function boot() {
     await loadSettings();
+    // 先读小手机里的角色人设 / 语音配置，再决定默认角色
+    await syncPhoneData();
     bind();
     await refreshShelf();
     window.addEventListener("beforeunload", saveProgress);
@@ -1246,8 +1523,10 @@
       });
       S.activeCharacterId = "default";
       saveSettings();
-      updateBuddy();
     }
+    updateBuddy();
+    renderVoices();
+    renderMe();
   }
 
   // 安卓返回键：先关弹层，再回书架；返回 true 表示页面自己处理了

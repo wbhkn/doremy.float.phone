@@ -188,13 +188,17 @@
     <div class="sheet-row"><span class="label">模型</span><input type="text" id="llmModel" placeholder="abab6.5s-chat / gpt-4o-mini / deepseek-chat" /></div>
     <div class="sheet-row"><button class="btn wide" id="btnSaveLlm">保存模型配置</button></div>
 
-    <div class="sheet-row" style="border-bottom:0"><span class="label">语音服务</span>
-      <input type="text" id="ttsBase" placeholder="http://192.168.1.5:9880" />
+    <div class="sheet-row" style="border-bottom:0"><span class="label">听书引擎</span>
+      <span id="ttsEngineState" style="flex:1;color:var(--text-2);font-size:13px">检测中…</span>
+    </div>
+    <div class="sheet-row"><span class="label">自己的语音服务</span>
+      <input type="text" id="ttsBase" placeholder="可选：http://192.168.1.5:9880（GPT-SoVITS）" />
     </div>
     <div class="sheet-row"><button class="btn wide" id="btnTtsSheet">音色与语速</button></div>
     <div class="sheet-row" style="border-bottom:0;color:var(--muted);font-size:12px;line-height:1.7;display:block">
-      听书走你电脑上的 GPT-SoVITS。手机上要填电脑的局域网地址（同一 WiFi），电脑端用
-      <code>-a 0.0.0.0</code> 启动才能被手机访问。
+      默认用你小手机里已经配好的语音（MiniMax）读，正太 / 少年 / 青年 / 少女四种音色直接可用；
+      没配语音时退回手机自带的系统朗读。想用自己的 GPT-SoVITS，就把电脑上
+      <code>-a 0.0.0.0</code> 起的地址填在上面。
     </div>
   </div>
 </div>
@@ -203,7 +207,10 @@
 <div class="sheet" id="audioSheet">
   <div class="sheet-head"><span>听书 · 音色</span><button class="x" data-close="audioSheet">✕</button></div>
   <div class="sheet-body">
-    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">音色（对应 GPT-SoVITS 的参考音频）</div>
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">音色预设（点一下就换）</div>
+    <div class="seg" id="presetVoices" style="margin-bottom:6px"></div>
+    <div id="ttsEngineHint" style="font-size:12px;color:var(--muted);margin-bottom:16px"></div>
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">自己的音色（GPT-SoVITS 参考音频，可选）</div>
     <div class="seg" id="segVoice" style="margin-bottom:14px"></div>
     <div class="sheet-row"><span class="label">名称</span><input type="text" id="vName" placeholder="例如：阿绿" /></div>
     <div class="sheet-row"><span class="label">参考音频</span><input type="text" id="vRef" placeholder="服务器上的路径，如 D:/ref/a.wav" /></div>
