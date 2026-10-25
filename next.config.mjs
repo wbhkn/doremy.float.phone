@@ -24,6 +24,13 @@ const nextConfig = {
   typedRoutes: true,
   outputFileTracingRoot: projectRoot,
   distDir: resolveDistDir(),
+  env: {
+    // 这是自己部署的 fork：官方站的「AI PHONE ACCESS」账号/激活码申请已经关闭，
+    // 自部署的站点不该被挡在登录页外面，所以构建期直接把自托管模式钉成开。
+    // 想恢复登录门禁：删掉下面这行，并在部署平台配好 SUPABASE_URL /
+    // SUPABASE_SERVICE_ROLE_KEY，再到 Supabase 执行 docs/account-supabase.sql。
+    NEXT_PUBLIC_SELF_HOSTED_MODE: "1",
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },
