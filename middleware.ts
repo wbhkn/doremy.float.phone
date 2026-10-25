@@ -34,7 +34,8 @@ const STATIC_ROUTE_PREFIXES = [
   "/xiaohongshu/",
 ];
 
-const STATIC_FILE_RE = /\.(?:avif|bin|css|gif|glb|gltf|hdr|ico|jpeg|jpg|js|json|map|mjs|mp3|ogg|otf|png|svg|ttf|txt|wasm|wav|webmanifest|webp|woff|woff2)$/i;
+// apk/zip 也算静态文件：安装包要从浏览器直接下载，不能要求先登录账号。
+const STATIC_FILE_RE = /\.(?:apk|zip|avif|bin|css|gif|glb|gltf|hdr|ico|jpeg|jpg|js|json|map|mjs|mp3|ogg|otf|png|svg|ttf|txt|wasm|wav|webmanifest|webp|woff|woff2)$/i;
 
 function isPublicRoute(pathname: string): boolean {
   return PUBLIC_ROUTE_PREFIXES.some((prefix) => pathname === prefix.slice(0, -1) || pathname.startsWith(prefix));
