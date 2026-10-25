@@ -779,7 +779,11 @@ export function ScreenshotSettings({ onNotice }: { onNotice?: (msg: string) => v
               <div className="menu-label-group">
                 <span className="menu-label">系统支持</span>
                 <span className="menu-desc">
-                  {supported ? "系统版本支持截屏（Android 11+）" : "系统版本太低，截屏需要 Android 11 及以上"}
+                  {!bridgeOk
+                    ? "不在小手机 App 内，装到手机上才能截屏"
+                    : projection
+                      ? "系统授权截屏：每次点「看一眼屏幕」弹一次授权框"
+                      : "无障碍直取：系统版本支持，开启无障碍服务即可"}
                 </span>
               </div>
             </div>
