@@ -384,7 +384,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
     const openConnectDialog = () => {
         if (busy) return;
         const config = loadCloudBackupConfig();
-        setConnectUrl(normalizeBackupUrl(config.url));
+        setConnectUrl(normalizeBackupUrl(config.url) || PRESET_CLOUD_BACKUP_URL);
         setConnectKey(config.key || "");
         setConnectOpen(true);
     };
