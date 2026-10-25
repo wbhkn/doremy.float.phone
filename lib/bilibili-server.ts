@@ -217,7 +217,34 @@ async function fetchVideoMeta(bvid: string): Promise<{ data: Record<string, unkn
         return String(data.title || "").trim() ? data : null;
     };
 
-    // 1) 普通详情
+    // 1) 按 BV 号搜索：search 接口对机房 IP 宽松得多，而且返回的字段够画卡片
+    try {
+        const mixinKey = await getMixinKey();
+        const signed = signWbi({ keyword: bvid, search_type: "video", page: 1 }, mixinKey);
+        const { json } = await biliJson(
+            `https://api.bilibili.com/x/web-interface/wbi/search/type?${signed}`,
+        );
+        const result = (json.data || {}) as Record<string, unknown>;
+        const list = (result.result || []) as Record<string, unknown>[];
+        const hit = list.find(item => String(item.bvid || "") === bvid);
+        if (num(json.code) === 0 && hit && String(hit.title || "").trim()) {
+            return {
+                data: {
+                    title: stripHtml(hit.title),
+                    pic: String(hit.pic || "").replace(/^http:/, "https:"),
+                    desc: stripHtml(hit.description),
+                    owner: { name: stripHtml(hit.author), mid: num(hit.mid) },
+                    stat: { view: num(hit.play), danmaku: num(hit.video_review) },
+                    durationText: trim(hit.duration, 10),
+                },
+                source: "search",
+            };
+        }
+    } catch {
+        /* 继续下一条路 */
+    }
+
+    // 2) 普通详情
     try {
         const { json } = await biliJson(
             `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`,
@@ -432,7 +459,7 @@ async function actionVideo(query: Record<string, string>): Promise<BiliActionRes
         const meta = await fetchVideoMeta(bvid);
         data = meta.data;
         // 只拿到统计/网页兜底时，播放数以外的字段是缺的，告诉前端「这是不完整卡片」
-        partial = meta.source !== "view" && meta.source !== "view-wbi" && meta.source !== "view-detail";
+        partial = !["view", "view-wbi", "view-detail", "search"].includes(meta.source);
     } catch {
         return {
             ok: false,
@@ -466,7 +493,7 @@ async function actionVideo(query: Record<string, string>): Promise<BiliActionRes
         desc: trim(data.desc, 600),
         // 封面：聊天里要画真实视频卡片，缺了它卡片就只剩一行字
         pic: String(data.pic || "").replace(/^http:/, "https:"),
-        duration: formatDuration(num(data.duration)),
+        duration: trim(data.durationText, 10) || formatDuration(num(data.duration)),
         pubdate: data.pubdate
             ? new Date(num(data.pubdate) * 1000).toISOString().slice(0, 16).replace("T", " ")
             : "",
