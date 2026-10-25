@@ -19,6 +19,7 @@ import {
   readCheckInDiagnostics,
   readScreenshotDiagnostics,
   readScreenshotShareTargets,
+  readShellVersion,
 } from "@/lib/screenshot";
 import type { CheckInDiagnostics, ScreenshotDiagnostics, ScreenshotShareTargetState } from "@/lib/screenshot";
 
@@ -38,6 +39,18 @@ type Row = { label: string; value: string; tone?: "ok" | "warn" | "bad" };
 function toneOf(ok: boolean | undefined): "ok" | "warn" | "bad" {
   if (ok === true) return "ok";
   return "bad";
+}
+
+/** 比较 "1.0.20" 与 "1.0.21"；只用在诊断提示里，够用就行。 */
+function versionAtLeast(current: string, target: string): boolean {
+  const a = current.split(".").map((n) => parseInt(n, 10) || 0);
+  const b = target.split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return true;
 }
 
 const TONE_COLOR: Record<string, string> = {

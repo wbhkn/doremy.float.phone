@@ -31,6 +31,23 @@ export function hasScreenshotBridge(): boolean {
 }
 
 /**
+ * 读安卓壳自己的版本号（诊断面板用）。
+ *
+ * 排查「装没装上」时最省事的一行：网页可能是新的、壳还是旧的（或者反过来）。
+ * 拿不到就返回 null，面板不显示这一行，而不是写个「未知」让人猜。
+ */
+export function readShellVersion(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const shell = (window as unknown as { AndroidShell?: { getVersion?: () => string } }).AndroidShell;
+    const version = shell?.getVersion?.();
+    return version && typeof version === "string" && version.trim() ? version.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 读截屏桥的内部状态（诊断面板用）。壳不支持或读失败都返回 null，
  * 面板据此显示「当前版本不支持」，而不是抓一堆 undefined 去猜。
  */

@@ -42,7 +42,7 @@ jobs:
           echo "SHELL_KEYSTORE_FILE=/tmp/shell.keystore" >> "$GITHUB_ENV"
 
       - name: Build APKs
-        run: gradle -p android-shell :app:assembleDebug :app:assembleRelease :reader:assembleDebug :reader:assembleRelease
+        run: gradle -p android-shell :app:assembleDebug :app:assembleRelease
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -54,17 +54,3 @@ jobs:
         with:
           name: float-shell-release
           path: android-shell/app/build/outputs/apk/release/*.apk
-
-
-      # 浮读：独立阅读器 App 的安装包
-      - name: Upload reader release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: float-reader-release
-          path: android-shell/reader/build/outputs/apk/release/*.apk
-
-      - name: Upload reader debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: float-reader-debug
-          path: android-shell/reader/build/outputs/apk/debug/*.apk

@@ -451,6 +451,14 @@
     if (tab === "shelf") refreshShelf();
     if (tab === "discover") renderSearch();
     if (tab === "me") renderMe();
+    // 嵌在小手机 App 里时，告诉外壳当前在哪一页（外壳据此决定要不要显示「回到桌面」按钮）
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: "float-reader-view", view: tab === "read" ? "read" : "shelf" }, "*");
+      }
+    } catch (error) {
+      /* 单独打开时没有父窗口，忽略 */
+    }
   }
   // ────────────────────────────── 阅读 ──────────────────────────────
   let book = null;

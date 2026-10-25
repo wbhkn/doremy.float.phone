@@ -29,8 +29,9 @@ android {
         // 1.0.14：WebView 内补齐 Notification API（映射到原生通知桥）。
         // 1.0.17：老机型（Android 10 及以下）改用系统授权框截屏，截屏不再要求 Android 11+。
         // 1.0.19：内置阅读器拆成独立的「浮读」App（app.floatphone.reader），壳里不再带它。
-        versionCode 19
-        versionName "1.0.19"
+// 1.0.20：阅读器回到壳内（App 里嵌 public/reader），允许 https 页面里的局域网 http 语音（混合内容）。
+        versionCode 20
+        versionName "1.0.20"
         buildConfigField "String", "SITE_URL", "\"${siteUrl}\""
     }
 

@@ -14,4 +14,3 @@ dependencyResolutionManagement {
 }
 rootProject.name = "float-shell"
 include ":app"
-include ":reader"

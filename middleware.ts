@@ -21,6 +21,7 @@ const PUBLIC_ROUTE_PREFIXES = [
   // 刷B站的代理：只转 B 站公开数据（热门/排行/搜索/视频详情/评论），
   // 不带任何用户信息，所以放行；保留登录才能用反而会让角色的请求失败。
   "/api/bili/",
+  "/reader/",
 ];
 
 const STATIC_ROUTE_PREFIXES = [

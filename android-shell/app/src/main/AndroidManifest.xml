@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 系统授权截屏：Android 10 起调 getMediaProjection() 前必须有一个
+         mediaProjection 类型的前台服务在跑，否则系统抛 SecurityException。
+         这条权限本身（Android 14+ 才强制声明）是 normal 级别，装上即生效。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 通话浮窗：浮在其他 App 上层（Android 6+ 需用户在系统设置里手动授予） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -190,6 +194,14 @@
             android:name=".ScreenshotBallService"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
+
+        <!-- 系统授权截屏的承载服务：Android 10 起 targetSdk >= Q 的 App 必须在
+             mediaProjection 类型的前台服务里调 getMediaProjection()，在 Activity
+             里直接调会被系统拒绝。只活一次截屏的时长，取完一帧就退出。 -->
+        <service
+            android:name=".ProjectionCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <!-- 媒体控制：持有「通知使用权」后才有资格读活跃媒体会话、直接控制播放。
              它**不读任何通知内容**（onNotificationPosted 刻意不重写），存在的唯一

@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.view.Display
 import org.json.JSONObject
 import java.lang.ref.WeakReference
 
@@ -45,6 +46,9 @@ object ProjectionCapture {
 
     /** 当前页面所在的 Activity。授权框必须从 Activity 起，Service 起不了。 */
     private var host: WeakReference<MainActivity>? = null
+
+    /** 本次截屏的前台服务；收尾时停掉，别让通知栏留一条「正在看一眼屏幕」。 */
+    private var serviceRef: ProjectionCaptureService? = null
 
     /** 这一次等待中的回调（同一时刻只允许一张）。 */
     private var pending: ((Bitmap?, String?) -> Unit)? = null
@@ -105,17 +109,52 @@ object ProjectionCapture {
             finish(null, "你取消了截屏授权")
             return
         }
-        val manager = activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+        // Android 10 起，targetSdk >= Q 的 App 不允许在 Activity 里直接
+        // getMediaProjection()：必须已经有一个 mediaProjection 类型的前台服务在跑，
+        // 否则系统抛 SecurityException（AOSP MediaProjectionManagerService 里
+        // REQUIRE_FG_SERVICE_FOR_PROJECTION 写死）。以前这里 runCatching{}.getOrNull()
+        // 把异常吞成一句「系统没有给出截屏通道」——在 Mate 10（Android 10）上就是
+        // 必现：授权框弹得出来，画面永远拿不到。现在把授权结果转交给前台服务，
+        // 由服务进前台之后再取投影。
+        if (!ProjectionCaptureService.start(activity, resultCode, data)) {
+            finish(null, "没能启动截屏服务，请重试")
+        }
+    }
+
+    /** 前台服务已就位，记下来；不管成败，收尾时都要把它停掉。 */
+    fun attachService(service: ProjectionCaptureService) {
+        serviceRef = service
+    }
+
+    /** 服务在进入前台之前就失败了（系统拦了、或授权数据丢了）。 */
+    fun onServiceDown(reason: String) {
+        finish(null, reason)
+    }
+
+    /**
+     * 由 [ProjectionCaptureService] 在前台就位后调用——真正取投影的地方。
+     *
+     * 必须在 startForeground(mediaProjection) 之后调；顺序反了系统会拒绝。
+     */
+    fun captureFromService(service: ProjectionCaptureService, resultCode: Int, data: Intent) {
+        val manager = service.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
         if (manager == null) {
             finish(null, "这台手机取不到系统截屏服务")
             return
         }
-        val projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
-        if (projection == null) {
-            finish(null, "系统没有给出截屏通道")
+        val projection = try {
+            manager.getMediaProjection(resultCode, data)
+        } catch (e: Throwable) {
+            // 把系统原话带上：以前只留一句「系统没有给出截屏通道」，分不清是权限、
+            // 系统版本还是 ROM 拦截，现场只能猜。
+            finish(null, "系统没有给出截屏通道（${e.javaClass.simpleName}: ${e.message ?: "无详细信息"}）")
             return
         }
-        captureFirstFrame(activity, projection)
+        if (projection == null) {
+            finish(null, "系统没有给出截屏通道（系统返回了空）")
+            return
+        }
+        captureFirstFrame(service, projection)
     }
 
     // ── 取帧 ────────────────────────────────────────────────
@@ -127,7 +166,7 @@ object ProjectionCapture {
      * 虚拟屏和投影关掉——常驻的话状态栏会一直挂着投屏图标，用户会以为
      * 手机在录屏。
      */
-    private fun captureFirstFrame(activity: Activity, projection: MediaProjection) {
+    private fun captureFirstFrame(context: Context, projection: MediaProjection) {
         val thread = HandlerThread("float-projection").also { it.start() }
         val handler = Handler(thread.looper)
 
@@ -155,8 +194,12 @@ object ProjectionCapture {
 
         try {
             val metrics = DisplayMetrics()
+            // 这段可能跑在前台 Service 里，拿不到 Activity.windowManager；
+            // 默认屏幕的真实尺寸从 DisplayManager 取。
+            val defaultDisplay = (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+                ?.getDisplay(Display.DEFAULT_DISPLAY)
             @Suppress("DEPRECATION")
-            activity.windowManager.defaultDisplay.getRealMetrics(metrics)
+            defaultDisplay?.getRealMetrics(metrics)
             val width = metrics.widthPixels
             val height = metrics.heightPixels
             if (width <= 0 || height <= 0) {
@@ -234,6 +277,8 @@ object ProjectionCapture {
 
     private fun finish(bitmap: Bitmap?, reason: String?) {
         busy = false
+        serviceRef?.let { service -> runCatching { service.stopCapture() } }
+        serviceRef = null
         val callback = pending
         pending = null
         if (callback == null) {

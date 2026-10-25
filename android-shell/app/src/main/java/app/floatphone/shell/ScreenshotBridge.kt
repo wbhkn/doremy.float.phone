@@ -139,7 +139,10 @@ object ScreenshotBridge {
         .put("accessibilityOn", service != null)
         .put("projection", ProjectionCapture.isSupported())
         .put("mode", captureMode())
-        .put("ready", canCapture())
+        // ready 以前等于 canCapture()（无障碍直取）——那只在 Android 11+ 为真，
+        // 于是 Mate 10 这类走系统授权框的机器明明能截，诊断却显示「不可以」。
+        // 能否截屏 = 有没有可用的通道，跟走哪条路无关。
+        .put("ready", captureMode() != "none")
         .put("capturing", capturing)
         .put("lastError", lastError)
         .put("lastCaptureAt", lastCaptureAt)
