@@ -202,13 +202,88 @@ function riskControl(action: string, code: number): BiliActionResult {
     };
 }
 
+/**
+ * 拿一条视频的基础信息（标题/封面/UP/统计）。
+ *
+ * 机房 IP 会被 B 站分接口限流：popular/feed 没事，`/x/web-interface/view`
+ * 却经常直接 -412/-352，连 www 的网页都可能 412。所以这里按「从最完整到最兜底」
+ * 依次试，任何一步成功就返回，并用 source 告诉调用方数据来自哪条路。
+ */
+async function fetchVideoMeta(bvid: string): Promise<{ data: Record<string, unknown>; source: string }> {
+    const readView = (json: Record<string, unknown>): Record<string, unknown> | null => {
+        const code = num(json.code);
+        if (code !== 0) return null;
+        const data = (json.data || {}) as Record<string, unknown>;
+        return String(data.title || "").trim() ? data : null;
+    };
+
+    // 1) 普通详情
+    try {
+        const { json } = await biliJson(
+            `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`,
+        );
+        const data = readView(json);
+        if (data) return { data, source: "view" };
+    } catch {
+        /* 继续下一条路 */
+    }
+
+    // 2) 带 wbi 签名的详情（部分限流按「有无签名」区分）
+    try {
+        const mixinKey = await getMixinKey();
+        const signed = signWbi({ bvid }, mixinKey);
+        const { json } = await biliJson(
+            `https://api.bilibili.com/x/web-interface/view?${signed}`,
+        );
+        const data = readView(json);
+        if (data) return { data, source: "view-wbi" };
+    } catch {
+        /* 继续 */
+    }
+
+    // 3) detail 接口（单独一档限流，命中率高）
+    try {
+        const { json } = await biliJson(
+            `https://api.bilibili.com/x/web-interface/view/detail?bvid=${encodeURIComponent(bvid)}`,
+        );
+        const payload = (json.data || {}) as Record<string, unknown>;
+        const view = (payload.View || payload.view || {}) as Record<string, unknown>;
+        if (num(json.code) === 0 && String(view.title || "").trim()) {
+            return {
+                data: {
+                    ...view,
+                    stat: (payload.ViewStat || view.stat || {}) as Record<string, unknown>,
+                },
+                source: "view-detail",
+            };
+        }
+    } catch {
+        /* 继续 */
+    }
+
+    // 4) 网页 OG 标签
+    const web = await fetchWebCard(bvid);
+    if (web) return { data: web, source: "page" };
+
+    // 5) 只剩统计接口：至少能显示播放量
+    try {
+        const { json } = await biliJson(
+            `https://api.bilibili.com/x/web-interface/archive/stat?bvid=${encodeURIComponent(bvid)}`,
+        );
+        if (num(json.code) === 0 && json.data) {
+            return { data: { title: "", stat: json.data as Record<string, unknown> }, source: "stat" };
+        }
+    } catch {
+        /* 全都失败 */
+    }
+
+    throw new Error("视频信息拿不到（接口与网页都被拦）");
+}
+
 async function fetchViewRaw(bvid: string): Promise<Record<string, unknown>> {
-    const { json } = await biliJson(
-        `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`,
-    );
-    const code = num(json.code);
-    if (code !== 0) throw new Error(`视频详情拿不到（code ${code}）`);
-    return (json.data || {}) as Record<string, unknown>;
+    const { data } = await fetchVideoMeta(bvid);
+    if (!String(data.title || "").trim()) throw new Error("视频详情拿不到（标题为空）");
+    return data;
 }
 
 /**
@@ -354,20 +429,17 @@ async function actionVideo(query: Record<string, string>): Promise<BiliActionRes
     let data: Record<string, unknown>;
     let partial = false;
     try {
-        data = await fetchViewRaw(bvid);
+        const meta = await fetchVideoMeta(bvid);
+        data = meta.data;
+        // 只拿到统计/网页兜底时，播放数以外的字段是缺的，告诉前端「这是不完整卡片」
+        partial = meta.source !== "view" && meta.source !== "view-wbi" && meta.source !== "view-detail";
     } catch {
-        // API 被风控时退回网页 OG 标签：标题和封面照样是真的，只是没有播放数/时长
-        const fallback = await fetchWebCard(bvid);
-        if (!fallback) {
-            return {
-                ok: false,
-                action: "video",
-                reason: "risk_control",
-                message: "B 站这次没让看（接口和网页都被拦了），过一会儿再试",
-            };
-        }
-        data = fallback;
-        partial = true;
+        return {
+            ok: false,
+            action: "video",
+            reason: "risk_control",
+            message: "B 站这次没让看（接口和网页都被拦了），过一会儿再试",
+        };
     }
     const stat = (data.stat || {}) as Record<string, unknown>;
     const owner = (data.owner || {}) as Record<string, unknown>;

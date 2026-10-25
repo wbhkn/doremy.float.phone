@@ -77,9 +77,12 @@ export async function fetchBiliCard(bvid: string): Promise<BiliCardData | null> 
         const res = await fetch(`/api/bili/video?bvid=${encodeURIComponent(bvid)}`);
         const json = (await res.json()) as Record<string, unknown>;
         if (!json?.ok) return null;
+        const title = String(json.title || "").trim();
+        // 标题是卡片的骨架：拿不到就当失败，让调用方用分享文案里的标题兜底
+        if (!title) return null;
         return {
             bvid,
-            title: String(json.title || "").trim() || bvid,
+            title,
             up: String(json.up || "").trim(),
             pic: String(json.pic || "").replace(/^http:/, "https:"),
             view: Number(json.view) || 0,
