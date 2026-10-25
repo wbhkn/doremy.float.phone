@@ -41,7 +41,7 @@ function toneOf(ok: boolean | undefined): "ok" | "warn" | "bad" {
   return "bad";
 }
 
-/** 比较 "1.0.20" 与 "1.0.21"；只用在诊断提示里，够用就行。 */
+/** 比较版本号（只用在诊断提示里，够用就行）。 */
 function versionAtLeast(current: string, target: string): boolean {
   const a = current.split(".").map((n) => parseInt(n, 10) || 0);
   const b = target.split(".").map((n) => parseInt(n, 10) || 0);
@@ -66,6 +66,7 @@ export function ScreenshotDiagnosticsPanel({ onNotice }: { onNotice?: (msg: stri
   const [open, setOpen] = useState(false);
 
   const inShell = isShell();
+  const shellVersion = readShellVersion();
 
   const refresh = useCallback(() => {
     setShot(readScreenshotDiagnostics());
@@ -84,6 +85,16 @@ export function ScreenshotDiagnosticsPanel({ onNotice }: { onNotice?: (msg: stri
 
   const shotRows: Row[] = shot
     ? [
+        // 先亮版本号：用户报「装好了还是不行」时，第一个要排除的就是装的是不是新版。
+        {
+          label: "App 版本",
+          value: shellVersion
+            ? versionAtLeast(shellVersion, "1.0.20")
+              ? `${shellVersion}（含 Android 10 系统授权截屏）`
+              : `${shellVersion}（旧版：Android 10 上系统授权截屏会失败，要 1.0.20 起）`
+            : "读不到（网页不在壳里，或壳太旧）",
+          tone: shellVersion && versionAtLeast(shellVersion, "1.0.20") ? "ok" : "warn",
+        },
         // 老机型（如 Android 10）走的是系统授权截屏，不是无障碍；这里必须按
         // 实际通道说话，否则一句「支持（Android 11+）」会让人以为还得换手机。
         {
