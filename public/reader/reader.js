@@ -160,6 +160,7 @@
     tts: {
       base: "",
       speed: 1,
+      engine: "auto",
       presetId: "female-shaonv",
       voices: [],
       activeVoiceId: "",
@@ -195,11 +196,21 @@
   const activePreset = () =>
     VOICE_PRESETS.find((v) => v.id === S.tts.presetId) || VOICE_PRESETS[3];
 
-  /** 该用哪条听书通道：小手机里的 MiniMax → 手机系统朗读 → 自己的 GPT-SoVITS */
+  const hasSystemVoice = () =>
+    !!(window.speechSynthesis && typeof window.speechSynthesis.speak === "function");
+  const gtsReady = () => !!S.tts.base && !/127\.0\.0\.1|localhost/i.test(S.tts.base);
+  /**
+   * 该用哪条听书通道。设置里可以明确选「自动 / 小手机语音 / 我的电脑」；
+   * 自动时优先你自己配的 GPT-SoVITS（免费、不花额度），没配才退到小手机的 MiniMax，最后才是系统朗读。
+   */
   function ttsEngine() {
+    const want = S.tts.engine || "auto";
+    if (want === "gts") return gtsReady() ? "gts" : "none";
+    if (want === "phone") return phoneVoice && phoneVoice.apiKey ? "phone" : "none";
+    if (want === "system") return hasSystemVoice() ? "system" : "none";
+    if (gtsReady()) return "gts";
     if (phoneVoice && phoneVoice.apiKey) return "phone";
-    if (typeof window.speechSynthesis === "function") return "system";
-    if (S.tts.base && !/127\.0\.0\.1|localhost/i.test(S.tts.base)) return "gts";
+    if (hasSystemVoice()) return "system";
     return "none";
   }
   function engineLabel() {
@@ -729,6 +740,10 @@
 
   // ────────────────────────────── 目录 ──────────────────────────────
   function openToc() {
+    if (!book) {
+      toast("先打开一本书", 1600);
+      return;
+    }
     const list = $("tocList");
     list.innerHTML = "";
     book.chapters.forEach((c, i) => {
@@ -1162,6 +1177,7 @@
     $("llmKey").value = S.llm.key || "";
     $("llmModel").value = S.llm.model || "";
     $("ttsBase").value = S.tts.base || "";
+    if ($("ttsBaseQ")) $("ttsBaseQ").value = S.tts.base || "";
     updateBuddy();
   }
   function updateBuddy() {
@@ -1190,6 +1206,26 @@
       });
     }
     if ($("ttsEngineHint")) $("ttsEngineHint").textContent = `当前：${engineLabel()}`;
+    const wantEngine = S.tts.engine || "auto";
+    const engineBox = $("segEngine");
+    if (engineBox) [...engineBox.children].forEach((b) => b.classList.toggle("active", b.dataset.engine === wantEngine));
+    if ($("engineHint")) {
+      const tips = {
+        auto: gtsReady()
+          ? "自动：先用你自己电脑上的 GPT-SoVITS"
+          : phoneVoice && phoneVoice.apiKey
+            ? "自动：用小手机里的语音（想用电脑的本地模型就在下面填地址）"
+            : "自动：用手机自带的朗读；想更好听就在下面填 GPT-SoVITS 地址",
+        phone:
+          phoneVoice && phoneVoice.apiKey
+            ? "用小手机里配的 MiniMax 语音（会消耗额度）"
+            : "小手机里还没配语音，先去小手机设置里加一个",
+        gts: gtsReady()
+          ? `用你自己的 GPT-SoVITS：${S.tts.base}`
+          : "还没填 GPT-SoVITS 地址，填下面那一栏后就能用电脑的本地模型",
+      };
+      $("engineHint").textContent = tips[wantEngine] || tips.auto;
+    }
 
     // 2) 自建音色（GPT-SoVITS 参考音频）
     const seg = $("segVoice");
@@ -1228,6 +1264,64 @@
     });
 
     $("btnBackShelf").addEventListener("click", backToShelf);
+    const exitBtn = $("btnExit");
+    if (exitBtn) {
+      exitBtn.addEventListener("click", () => {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "float-reader-exit" }, "*");
+        } else {
+          toast("已经是最外层了", 1400);
+        }
+      });
+    }
+    const baseQ = $("ttsBaseQ");
+    if (baseQ) {
+      baseQ.addEventListener("change", () => {
+        S.tts.base = baseQ.value.trim();
+        saveSettings();
+        if ($("ttsBase")) $("ttsBase").value = S.tts.base;
+        renderVoices();
+        renderMe();
+        toast(S.tts.base ? "地址记住了" : "地址清空了", 1600);
+      });
+    }
+    const testTts = $("btnTestTts");
+    if (testTts) {
+      testTts.addEventListener("click", async () => {
+        if (!gtsReady()) return toast("先把电脑地址填上，形如 http://192.168.1.5:9880", 2600);
+        testTts.textContent = "连一下…";
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 8000);
+          const url = `${S.tts.base.replace(/\/+$/, "")}/tts?text=${encodeURIComponent("你好")}&text_lang=zh&text_split_method=cut5&media_type=wav&streaming_mode=false`;
+          const r = await fetch(url, { signal: ctrl.signal });
+          clearTimeout(timer);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          toast("连上了，可以用电脑上的声音听书", 2600);
+          S.tts.engine = "gts";
+          saveSettings();
+          renderVoices();
+        } catch (e) {
+          const why = e && e.name === "AbortError" ? "等了 8 秒没回应，可能地址不对或者电脑没开服务" : (e && e.message) || e;
+          toast(`连不上：${why}（确认开的是 -a 0.0.0.0，手机和电脑同一个 WiFi）`, 4600);
+        } finally {
+          testTts.textContent = "测一下这台电脑能不能连上";
+        }
+      });
+    }
+    const engineSeg = $("segEngine");
+    if (engineSeg) {
+      engineSeg.addEventListener("click", (e) => {
+        const b = e.target.closest ? e.target.closest("button[data-engine]") : null;
+        if (!b) return;
+        S.tts.engine = b.dataset.engine;
+        saveSettings();
+        renderVoices();
+        renderMe();
+        if (S.tts.engine === "gts" && !gtsReady()) toast("先在下面填 GPT-SoVITS 地址", 2400);
+        else toast(`听书引擎：${engineLabel()}`, 1800);
+      });
+    }
     $("btnToc").addEventListener("click", openToc);
     $("chipToc").addEventListener("click", openToc);
     $("tocClose").addEventListener("click", closeToc);
@@ -1384,6 +1478,7 @@
     $("chipListen").addEventListener("click", () => {
       if (!S.tts.base) {
         $("ttsBase").value = S.tts.base || "";
+    if ($("ttsBaseQ")) $("ttsBaseQ").value = S.tts.base || "";
         renderCharacters();
         return openSheet("settingsSheet");
       }
@@ -1511,6 +1606,10 @@
     bind();
     await refreshShelf();
     window.addEventListener("beforeunload", saveProgress);
+    // 告诉小手机壳：阅读器已经活了（壳用它决定要不要显示兜底的返回键）
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "float-reader-ready" }, "*");
+    }
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) saveProgress();
     });

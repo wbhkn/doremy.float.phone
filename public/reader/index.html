@@ -13,6 +13,7 @@
   <section class="view" id="shelfView">
     <div class="hero">
       <div class="hero-sun"></div>
+      <button class="hero-exit" id="btnExit" title="回到桌面" aria-label="回到桌面">‹</button>
       <div class="hero-tabs" id="heroTabs">
         <button class="htab active" data-filter="all">收藏</button>
         <button class="htab" data-filter="recent">最近阅读</button>
@@ -100,11 +101,11 @@
     </div>
 
     <div class="toolbar">
-      <button class="chip" id="chipPrev">‹ 上一章</button>
+      <button class="chip" id="chipPrev" title="上一章">‹</button>
       <button class="chip" id="chipToc">目录</button>
-      <button class="chip solid" id="chipListen">▶ 听书</button>
-      <button class="chip" id="chipFont">Aa 字号</button>
-      <button class="chip" id="chipNext">下一章 ›</button>
+      <button class="chip solid grow" id="chipListen">▶ 听书</button>
+      <button class="chip" id="chipFont" title="字号">Aa</button>
+      <button class="chip" id="chipNext" title="下一章">›</button>
     </div>
 
     <div class="audio-bar hidden" id="audioBar">
@@ -207,6 +208,16 @@
 <div class="sheet" id="audioSheet">
   <div class="sheet-head"><span>听书 · 音色</span><button class="x" data-close="audioSheet">✕</button></div>
   <div class="sheet-body">
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">听书引擎</div>
+    <div class="seg" id="segEngine" style="margin-bottom:12px">
+      <button data-engine="auto" class="active">自动</button>
+      <button data-engine="phone">小手机语音</button>
+      <button data-engine="gts">我的电脑</button>
+    </div>
+    <div id="engineHint" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
+    <div class="sheet-row"><span class="label">电脑地址</span><input type="text" id="ttsBaseQ" placeholder="http://192.168.1.5:9880" /></div>
+    <div class="sheet-row"><button class="btn wide" id="btnTestTts">测一下这台电脑能不能连上</button></div>
+    <div style="height:6px"></div>
     <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">音色预设（点一下就换）</div>
     <div class="seg" id="presetVoices" style="margin-bottom:6px"></div>
     <div id="ttsEngineHint" style="font-size:12px;color:var(--muted);margin-bottom:16px"></div>
