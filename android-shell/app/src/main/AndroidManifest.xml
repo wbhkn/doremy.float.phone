@@ -143,19 +143,6 @@
             </intent-filter>
         </activity>
 
-        <!-- 浮读：壳里内置的本地阅读器（assets/reader/）。独立入口，不联网也能看。 -->
-        <activity
-            android:name=".ReaderActivity"
-            android:exported="true"
-            android:label="浮读"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
-            android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.FloatShell">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
 
         <activity
             android:name=".IncomingCallActivity"

@@ -8,24 +8,75 @@
 <link rel="stylesheet" href="reader.css" />
 </head>
 <body>
-<div class="app">
+<div class="app" id="app">
   <!-- ══════ 书架 ══════ -->
   <section class="view" id="shelfView">
-    <header class="head">
-      <button class="icon-btn spacer">‹</button>
-      <h1>书架</h1>
-      <button class="icon-btn" id="btnShelfSettings" title="设置">⚙</button>
-    </header>
-    <div class="shelf-scroll">
-      <div class="shelf-grid" id="shelfGrid"></div>
-      <div class="empty" id="shelfEmpty">
+    <div class="hero">
+      <div class="hero-sun"></div>
+      <div class="hero-tabs" id="heroTabs">
+        <button class="htab active" data-filter="all">收藏</button>
+        <button class="htab" data-filter="recent">最近阅读</button>
+        <button class="htab" data-filter="done">已读完</button>
+      </div>
+      <button class="hero-add" id="btnImport" title="导入">＋</button>
+    </div>
+    <div class="shelf-scroll" id="shelfScroll">
+      <div id="shelfGroups"></div>
+      <div class="empty hidden" id="shelfEmpty">
         <b>书架还是空的</b>
-        把 <code>.txt</code> / <code>.epub</code> 文件导入进来<br />
-        点右下角「导入」挑一个文件
+        把 <code>.txt</code> / <code>.epub</code> 文件放进来<br />
+        点右上角「＋」挑一个文件
       </div>
     </div>
-    <button class="fab" id="btnImport">＋ 导入</button>
     <input type="file" id="fileInput" accept=".txt,.text,.epub,.md,.markdown,.html,.htm,text/plain,application/epub+zip" multiple hidden />
+  </section>
+
+  <!-- ══════ 发现 ══════ -->
+  <section class="view hidden" id="discoverView">
+    <header class="page-head"><h1>发现</h1></header>
+    <div class="page-scroll">
+      <div class="card-group">
+        <button class="row-btn" id="btnImport2"><span>＋ 导入本地文件</span><em>TXT / EPUB / MD / HTML</em></button>
+        <div class="hint">书只存在这台手机上，不会上传。txt 会自动分辨 UTF-8 / GBK，并按「第 X 章」切章。</div>
+      </div>
+      <div class="card-group">
+        <div class="group-title">在书架里找</div>
+        <input class="search-input" id="searchBox" placeholder="书名 / 作者" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════ 我的 ══════ -->
+  <section class="view hidden" id="meView">
+    <header class="page-head"><h1>我的</h1></header>
+    <div class="page-scroll">
+      <div class="card-group" id="meStatus"></div>
+      <div class="card-group">
+        <div class="group-title">阅读</div>
+        <button class="row-btn" id="btnOpenSettings"><span>阅读设置</span><em>主题 / 字号 / 行距</em></button>
+        <button class="row-btn" id="btnOpenVoices"><span>音色与语速</span><em>听书</em></button>
+        <div class="row-theme" id="segTheme">
+          <button data-theme="jinjiang" class="active">晋江绿</button>
+          <button data-theme="paper">纸黄</button>
+          <button data-theme="night">夜读</button>
+        </div>
+      </div>
+      <div class="card-group">
+        <div class="group-title">批注模型</div>
+        <button class="row-btn" id="btnOpenLlm"><span>模型接口与 Key</span><em id="llmState">未配置</em></button>
+        <button class="row-btn" id="btnOpenCharacters"><span>角色</span><em id="charState">—</em></button>
+      </div>
+      <div class="card-group">
+        <div class="group-title">听书服务</div>
+        <button class="row-btn" id="btnOpenTts"><span>GPT-SoVITS 地址</span><em id="ttsState">未配置</em></button>
+        <div class="hint">电脑上跑 <code>api_v2.py -a 0.0.0.0 -p 9880</code>，手机和电脑连同一个 WiFi。</div>
+      </div>
+      <div class="card-group">
+        <div class="group-title">关于</div>
+        <div class="hint">浮读 · 本地阅读器<br />书的正文、进度、批注全部存在本机，不上传任何地方。</div>
+      </div>
+    </div>
   </section>
 
   <!-- ══════ 阅读 ══════ -->
@@ -64,8 +115,23 @@
       <button id="abClose">✕</button>
     </div>
   </section>
-</div>
 
+  <!-- ══════ 底部导航 ══════ -->
+  <nav class="tabbar" id="tabbar">
+    <button class="tab active" data-tab="shelf">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Zm8-1.5h4.5A1.5 1.5 0 0 1 18 5.5v13a1.5 1.5 0 0 1-1.5 1.5H12V4Z"/></svg>
+      <span>书架</span>
+    </button>
+    <button class="tab" data-tab="discover">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2"/><path d="M15.8 15.8 20 20"/></svg>
+      <span>发现</span>
+    </button>
+    <button class="tab" data-tab="me">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/></svg>
+      <span>我的</span>
+    </button>
+  </nav>
+</div>
 <!-- ══════ 目录 ══════ -->
 <aside class="toc" id="toc">
   <div class="toc-head"><span id="tocTitle">目录</span><button class="x" id="tocClose">✕</button></div>

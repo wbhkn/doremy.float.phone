@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="jinjiang">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<meta name="color-scheme" content="light dark" />
+<title>浮读</title>
+<link rel="stylesheet" href="reader.css" />
+</head>
+<body>
+<div class="app" id="app">
+  <!-- ══════ 书架 ══════ -->
+  <section class="view" id="shelfView">
+    <div class="hero">
+      <div class="hero-sun"></div>
+      <div class="hero-tabs" id="heroTabs">
+        <button class="htab active" data-filter="all">收藏</button>
+        <button class="htab" data-filter="recent">最近阅读</button>
+        <button class="htab" data-filter="done">已读完</button>
+      </div>
+      <button class="hero-add" id="btnImport" title="导入">＋</button>
+    </div>
+    <div class="shelf-scroll" id="shelfScroll">
+      <div id="shelfGroups"></div>
+      <div class="empty hidden" id="shelfEmpty">
+        <b>书架还是空的</b>
+        把 <code>.txt</code> / <code>.epub</code> 文件放进来<br />
+        点右上角「＋」挑一个文件
+      </div>
+    </div>
+    <input type="file" id="fileInput" accept=".txt,.text,.epub,.md,.markdown,.html,.htm,text/plain,application/epub+zip" multiple hidden />
+  </section>
+
+  <!-- ══════ 发现 ══════ -->
+  <section class="view hidden" id="discoverView">
+    <header class="page-head"><h1>发现</h1></header>
+    <div class="page-scroll">
+      <div class="card-group">
+        <button class="row-btn" id="btnImport2"><span>＋ 导入本地文件</span><em>TXT / EPUB / MD / HTML</em></button>
+        <div class="hint">书只存在这台手机上，不会上传。txt 会自动分辨 UTF-8 / GBK，并按「第 X 章」切章。</div>
+      </div>
+      <div class="card-group">
+        <div class="group-title">在书架里找</div>
+        <input class="search-input" id="searchBox" placeholder="书名 / 作者" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════ 我的 ══════ -->
+  <section class="view hidden" id="meView">
+    <header class="page-head"><h1>我的</h1></header>
+    <div class="page-scroll">
+      <div class="card-group" id="meStatus"></div>
+      <div class="card-group">
+        <div class="group-title">阅读</div>
+        <button class="row-btn" id="btnOpenSettings"><span>阅读设置</span><em>主题 / 字号 / 行距</em></button>
+        <button class="row-btn" id="btnOpenVoices"><span>音色与语速</span><em>听书</em></button>
+        <div class="row-theme" id="segTheme">
+          <button data-theme="jinjiang" class="active">晋江绿</button>
+          <button data-theme="paper">纸黄</button>
+          <button data-theme="night">夜读</button>
+        </div>
+      </div>
+      <div class="card-group">
+        <div class="group-title">批注模型</div>
+        <button class="row-btn" id="btnOpenLlm"><span>模型接口与 Key</span><em id="llmState">未配置</em></button>
+        <button class="row-btn" id="btnOpenCharacters"><span>角色</span><em id="charState">—</em></button>
+      </div>
+      <div class="card-group">
+        <div class="group-title">听书服务</div>
+        <button class="row-btn" id="btnOpenTts"><span>GPT-SoVITS 地址</span><em id="ttsState">未配置</em></button>
+        <div class="hint">电脑上跑 <code>api_v2.py -a 0.0.0.0 -p 9880</code>，手机和电脑连同一个 WiFi。</div>
+      </div>
+      <div class="card-group">
+        <div class="group-title">关于</div>
+        <div class="hint">浮读 · 本地阅读器<br />书的正文、进度、批注全部存在本机，不上传任何地方。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════ 阅读 ══════ -->
+  <section class="view hidden" id="readView">
+    <header class="head">
+      <button class="icon-btn" id="btnBackShelf" title="返回书架">‹</button>
+      <h1 id="bookTitle">—</h1>
+      <button class="icon-btn" id="btnToc" title="目录">☰</button>
+      <button class="icon-btn" id="btnReaderSettings" title="设置">⚙</button>
+    </header>
+    <div class="reader-scroll" id="readerScroll"></div>
+
+    <div class="buddy-bar" id="buddyBar">
+      <span class="buddy-ava" id="buddyAva">浮</span>
+      <div>
+        <div class="buddy-name" id="buddyName">还没有角色</div>
+        <div class="buddy-status" id="buddyStatus">去设置里加一个，让它陪你读</div>
+      </div>
+      <button class="buddy-ask" id="btnBuddyChat">聊聊</button>
+      <button class="buddy-ask" id="btnBuddyAnnotate" style="margin-left:6px">批注这段</button>
+    </div>
+
+    <div class="toolbar">
+      <button class="chip" id="chipPrev">‹ 上一章</button>
+      <button class="chip" id="chipToc">目录</button>
+      <button class="chip solid" id="chipListen">▶ 听书</button>
+      <button class="chip" id="chipFont">Aa 字号</button>
+      <button class="chip" id="chipNext">下一章 ›</button>
+    </div>
+
+    <div class="audio-bar hidden" id="audioBar">
+      <button id="abPrev">⏮</button>
+      <button class="main" id="abPlay">⏸</button>
+      <button id="abNext">⏭</button>
+      <div class="t" id="abText">—</div>
+      <button id="abClose">✕</button>
+    </div>
+  </section>
+
+  <!-- ══════ 底部导航 ══════ -->
+  <nav class="tabbar" id="tabbar">
+    <button class="tab active" data-tab="shelf">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Zm8-1.5h4.5A1.5 1.5 0 0 1 18 5.5v13a1.5 1.5 0 0 1-1.5 1.5H12V4Z"/></svg>
+      <span>书架</span>
+    </button>
+    <button class="tab" data-tab="discover">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2"/><path d="M15.8 15.8 20 20"/></svg>
+      <span>发现</span>
+    </button>
+    <button class="tab" data-tab="me">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/></svg>
+      <span>我的</span>
+    </button>
+  </nav>
+</div>
+<!-- ══════ 目录 ══════ -->
+<aside class="toc" id="toc">
+  <div class="toc-head"><span id="tocTitle">目录</span><button class="x" id="tocClose">✕</button></div>
+  <div class="toc-list" id="tocList"></div>
+</aside>
+<div class="mask" id="mask"></div>
+
+<!-- ══════ 选中段落的操作栏 ══════ -->
+<div class="selbar" id="selbar">
+  <div class="selbar-quote" id="selQuote"></div>
+  <div class="selbar-actions">
+    <button class="btn primary" id="selAnnotate">让它批注</button>
+    <button class="btn" id="selWrite">我写</button>
+    <button class="btn" id="selRead">朗读</button>
+    <button class="btn" id="selCopy">复制</button>
+    <button class="btn" id="selCancel">✕</button>
+  </div>
+</div>
+
+<!-- ══════ 阅读设置 ══════ -->
+<div class="sheet" id="settingsSheet">
+  <div class="sheet-head"><span>设置</span><button class="x" data-close="settingsSheet">✕</button></div>
+  <div class="sheet-body">
+    <div class="sheet-row"><span class="label">主题</span>
+      <div class="seg" id="segTheme">
+        <button data-theme="jinjiang" class="active">晋江绿</button>
+        <button data-theme="paper">纸黄</button>
+        <button data-theme="night">夜读</button>
+      </div>
+    </div>
+    <div class="sheet-row"><span class="label">字号</span>
+      <div class="stepper"><button data-fs="-1">−</button><span id="valFs">17</span><button data-fs="1">＋</button></div>
+    </div>
+    <div class="sheet-row"><span class="label">行距</span>
+      <div class="stepper"><button data-lh="-0.1">−</button><span id="valLh">1.95</span><button data-lh="0.1">＋</button></div>
+    </div>
+
+    <div class="sheet-row" style="border-bottom:0"><span class="label">角色</span>
+      <select id="selCharacter" style="flex:1;border:1px solid var(--green-light);background:var(--green-pale);color:var(--text-2);border-radius:8px;padding:8px"></select>
+      <button class="btn" id="btnAddCharacter">＋ 新增</button>
+    </div>
+    <div id="characterForm" class="hidden">
+      <div class="sheet-row"><span class="label">名字</span><input type="text" id="cfName" placeholder="角色名" /></div>
+      <div class="sheet-row" style="align-items:flex-start"><span class="label">人设</span>
+        <textarea id="cfPersona" rows="4" placeholder="它是什么样的人：说话习惯、在意什么、会怎么吐槽、和你的关系……" style="flex:1;min-width:0;border:1px solid var(--green-light);background:var(--green-pale);color:var(--text-2);border-radius:8px;padding:8px;font-size:13px;font-family:inherit"></textarea>
+      </div>
+      <div class="sheet-row"><button class="btn primary wide" id="btnSaveCharacter">保存角色</button></div>
+    </div>
+
+    <div class="sheet-row" style="border-bottom:0"><span class="label">批注模型</span>
+      <input type="text" id="llmBase" placeholder="https://api.minimax.chat/v1" />
+    </div>
+    <div class="sheet-row"><span class="label">Key</span><input type="password" id="llmKey" placeholder="API Key" /></div>
+    <div class="sheet-row"><span class="label">模型</span><input type="text" id="llmModel" placeholder="abab6.5s-chat / gpt-4o-mini / deepseek-chat" /></div>
+    <div class="sheet-row"><button class="btn wide" id="btnSaveLlm">保存模型配置</button></div>
+
+    <div class="sheet-row" style="border-bottom:0"><span class="label">语音服务</span>
+      <input type="text" id="ttsBase" placeholder="http://192.168.1.5:9880" />
+    </div>
+    <div class="sheet-row"><button class="btn wide" id="btnTtsSheet">音色与语速</button></div>
+    <div class="sheet-row" style="border-bottom:0;color:var(--muted);font-size:12px;line-height:1.7;display:block">
+      听书走你电脑上的 GPT-SoVITS。手机上要填电脑的局域网地址（同一 WiFi），电脑端用
+      <code>-a 0.0.0.0</code> 启动才能被手机访问。
+    </div>
+  </div>
+</div>
+
+<!-- ══════ 音色 / 语速 ══════ -->
+<div class="sheet" id="audioSheet">
+  <div class="sheet-head"><span>听书 · 音色</span><button class="x" data-close="audioSheet">✕</button></div>
+  <div class="sheet-body">
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">音色（对应 GPT-SoVITS 的参考音频）</div>
+    <div class="seg" id="segVoice" style="margin-bottom:14px"></div>
+    <div class="sheet-row"><span class="label">名称</span><input type="text" id="vName" placeholder="例如：阿绿" /></div>
+    <div class="sheet-row"><span class="label">参考音频</span><input type="text" id="vRef" placeholder="服务器上的路径，如 D:/ref/a.wav" /></div>
+    <div class="sheet-row"><span class="label">参考文本</span><input type="text" id="vPrompt" placeholder="参考音频里说的那段话" /></div>
+    <div class="sheet-row"><span class="label">语言</span>
+      <div class="seg" id="segLang">
+        <button data-lang="zh" class="active">中文</button>
+        <button data-lang="ja">日文</button>
+        <button data-lang="en">英文</button>
+      </div>
+    </div>
+    <div class="sheet-row"><button class="btn primary wide" id="btnSaveVoice">保存这个音色</button></div>
+    <div class="sheet-row"><span class="label">语速</span>
+      <div class="stepper"><button data-speed="-0.1">−</button><span id="valSpeed">1.0</span><button data-speed="0.1">＋</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ 和角色聊书 ══════ -->
+<div class="sheet" id="chatSheet">
+  <div class="sheet-head"><span id="chatTitle">聊聊这本书</span><button class="x" data-close="chatSheet">✕</button></div>
+  <div class="sheet-body">
+    <div class="chat-list" id="chatList"></div>
+    <div class="chat-input">
+      <input type="text" id="chatText" placeholder="问它点什么…" />
+      <button id="chatSend">发送</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ 写批注 ══════ -->
+<div class="sheet" id="noteSheet">
+  <div class="sheet-head"><span>批注</span><button class="x" data-close="noteSheet">✕</button></div>
+  <div class="sheet-body">
+    <div class="selbar-quote" id="noteQuote"></div>
+    <textarea id="noteText" rows="4" placeholder="你想说什么…" style="width:100%;border:1px solid var(--green-light);background:var(--green-pale);color:var(--text);border-radius:10px;padding:10px;font-size:14px;line-height:1.7;font-family:inherit"></textarea>
+    <div class="sheet-row" style="gap:8px;margin-top:10px;border-bottom:0">
+      <button class="btn" id="noteAi">让 TA 写</button>
+      <button class="btn primary" id="noteSave" style="margin-left:auto">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="jszip.min.js"></script>
+<script src="reader.js"></script>
+</body>
+</html>

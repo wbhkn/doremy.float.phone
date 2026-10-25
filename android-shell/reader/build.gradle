@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// 浮读（独立阅读器 App）。和小手机壳是两个应用：各自包名、各自图标，
+// 可以单独安装、单独卸载，互不影响。签名复用同一把 keystore（CI 里注入），
+// 这样以后换版本能覆盖安装、书的进度和批注不会丢。
+def ksFile = System.getenv("SHELL_KEYSTORE_FILE")
+
+android {
+    namespace 'app.floatphone.reader'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "app.floatphone.reader"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    if (ksFile) {
+        signingConfigs {
+            release {
+                storeFile file(ksFile)
+                storePassword System.getenv("SHELL_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("SHELL_KEY_ALIAS")
+                keyPassword System.getenv("SHELL_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksFile) signingConfig signingConfigs.release
+        }
+        debug {
+            // 与壳一致：有固定签名时 debug 也用同一把钥匙，避免签名一变就得卸载重装
+            if (ksFile) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
+
+// 页面源码只有一份：仓库根的 reader-web/。构建前同步进 assets，
+// 免得「改了网页忘了拷」两处不一致。
+tasks.register("syncReaderAssets", Sync) {
+    from(file("../../reader-web"))
+    into(layout.projectDirectory.dir("src/main/assets/reader"))
+}
+tasks.named("preBuild").configure { dependsOn("syncReaderAssets") }
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.activity:activity-ktx:1.9.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

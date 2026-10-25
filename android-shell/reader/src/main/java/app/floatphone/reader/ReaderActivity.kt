@@ -1,4 +1,4 @@
-package app.floatphone.shell
+package app.floatphone.reader
 
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -18,7 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewAssetLoader
 
 /**
- * 浮读：内置在壳里的本地阅读器。
+ * 浮读：独立阅读器 App（不依赖小手机壳）。
  *
  * 它不联网也能用——书和批注都存在本机 IndexedDB 里。
  * 只有两件事会出网：
@@ -161,3 +161,4 @@ class ReaderActivity : AppCompatActivity() {
         const val REQ_PICK_FILE = 4711
     }
 }
+

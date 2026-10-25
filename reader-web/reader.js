@@ -279,45 +279,179 @@
   // ────────────────────────────── 书架 ──────────────────────────────
   let books = [];
   let progressAll = {};
+  let shelfFilter = "all";
+  const expandedGroups = Object.create(null);
+
+  const COVER_COLORS = [
+    ["#5c8f7d", "#33584c"], ["#5b7fb8", "#31517e"], ["#c08350", "#81512a"],
+    ["#8a6bb0", "#59407a"], ["#c25b6a", "#86323f"], ["#4f8fa8", "#2d5f74"],
+    ["#7d9150", "#4d5c2b"], ["#a8668f", "#6f3d5b"],
+  ];
+  function coverColor(id) {
+    // FNV-1a：短 id 也散得开，相邻 id 不会撞成同一个封面色
+    let h = 2166136261;
+    const s = String(id || "");
+    for (let i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return COVER_COLORS[(h >>> 0) % COVER_COLORS.length];
+  }
+
+  function bookState(b) {
+    const p = progressAll[b.id] || {};
+    const total = Math.max(1, (b.chapters || []).length);
+    if (p.chIdx == null) return { pct: 0, done: false };
+    // 末章且确实往下翻过（scrollTop 有记录）才算读完，避免一打开就「已读完」
+    const atEnd = p.chIdx >= total - 1 && (p.scrollTop || 0) > 200;
+    if (atEnd) return { pct: 100, done: true };
+    const pct = Math.min(99, Math.max(1, Math.round(((p.chIdx + 0.6) / total) * 100)));
+    return { pct, done: false };
+  }
+  const bookPercent = (b) => bookState(b).pct;
+
+  async function delBook(b) {
+    if (!confirm(`删掉《${b.title || "无题"}》？（批注也一起删）`)) return;
+    await store.delBook(b.id);
+    const notes = await store.notesOf(b.id);
+    await Promise.all(notes.map((n) => store.delNote(n.id)));
+    delete progressAll[b.id];
+    await store.kvSet("progress", progressAll).catch(() => {});
+    toast("已删除");
+    refreshShelf();
+  }
+
+  function coverCard(b) {
+    const p = progressAll[b.id] || {};
+    const st = bookState(b);
+    const pct = st.pct;
+    const [c1, c2] = coverColor(b.id);
+    const card = el("div", "cover-card");
+    const badge = st.done
+      ? '<span class="cbadge done">已读完</span>'
+      : p.chIdx != null
+        ? '<span class="cbadge read">读中</span>'
+        : "";
+    card.innerHTML = `
+      <div class="cover" style="--c1:${c1};--c2:${c2}"><span class="ct">${esc(b.title || "无题")}</span></div>
+      ${badge}
+      ${pct > 0 && pct < 99 ? `<span class="progress-dot">${pct}%</span>` : ""}`;
+    card.addEventListener("click", () => openBook(b.id));
+    let hold = 0;
+    card.addEventListener("pointerdown", () => {
+      hold = setTimeout(() => {
+        hold = 0;
+        delBook(b);
+      }, 650);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((t) =>
+      card.addEventListener(t, () => {
+        if (hold) {
+          clearTimeout(hold);
+          hold = 0;
+        }
+      }),
+    );
+    return card;
+  }
+
+  function groupBlock(key, title, list, limit) {
+    const wrap = el("div", "group");
+    const head = el("div", "group-head");
+    head.innerHTML = `<h2>${esc(title)}</h2><span class="cnt">共 ${list.length} 本</span>`;
+    const open = expandedGroups[key] || !limit || list.length <= limit;
+    if (limit && list.length > limit) {
+      const more = el("button", "more", open ? "收起" : "more");
+      more.addEventListener("click", () => {
+        expandedGroups[key] = !open;
+        renderShelf();
+      });
+      head.appendChild(more);
+    }
+    wrap.appendChild(head);
+    const grid = el("div", "cover-grid");
+    (open ? list : list.slice(0, limit)).forEach((b) => grid.appendChild(coverCard(b)));
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
+  function renderShelf() {
+    const box = $("shelfGroups");
+    box.innerHTML = "";
+    $("shelfEmpty").classList.toggle("hidden", books.length > 0);
+    document.querySelectorAll("#heroTabs .htab").forEach((t) => t.classList.toggle("active", t.dataset.filter === shelfFilter));
+
+    const recent = books
+      .filter((b) => (progressAll[b.id] || {}).chIdx != null)
+      .sort((a, b) => String(b.lastReadAt || "").localeCompare(String(a.lastReadAt || "")));
+    const done = books.filter((b) => bookState(b).done);
+    const rest = books.filter((b) => done.indexOf(b) < 0);
+
+    const groups = [];
+    if (shelfFilter === "recent") groups.push(["recent", "最近阅读", recent, 12]);
+    else if (shelfFilter === "done") groups.push(["done", "已读完", done, 12]);
+    else {
+      if (recent.length) groups.push(["recent", "最近阅读", recent, 4]);
+      groups.push(["all", "全部收藏", rest, 12]);
+      if (done.length) groups.push(["done", "已读完", done, 8]);
+    }
+    groups.forEach(([k, t, list, lim]) => {
+      if (list.length) box.appendChild(groupBlock(k, t, list, lim));
+    });
+  }
 
   async function refreshShelf() {
     books = await store.allBooks();
-    books.sort((a, b) => (b.lastReadAt || b.createdAt || "").localeCompare(a.lastReadAt || a.createdAt || ""));
-    progressAll = await store.kvGet("progress") || {};
-    const grid = $("shelfGrid");
-    grid.innerHTML = "";
-    $("shelfEmpty").classList.toggle("hidden", books.length > 0);
-    for (const b of books) {
-      const p = progressAll[b.id] || {};
-      const card = el("div", "book-card");
-      card.innerHTML = `
-        <button class="book-del" data-del="${esc(b.id)}" title="删除">✕</button>
-        <div class="book-cover">${esc((b.title || "无题").slice(0, 18))}</div>
-        <div class="book-title">${esc(b.title || "无题")}</div>
-        <div class="book-meta">
-          <span class="badge">${esc((b.format || "txt").toUpperCase())}</span>
-          <span>${b.chapters.length} 章</span>
-          ${p.chIdx != null ? `<span>读到 ${p.chIdx + 1}</span>` : `<span>未读</span>`}
-        </div>`;
-      card.addEventListener("click", (ev) => {
-        if (ev.target.dataset.del) return;
-        openBook(b.id);
-      });
-      grid.appendChild(card);
-    }
-    grid.querySelectorAll("[data-del]").forEach((btn) =>
-      btn.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        const id = btn.dataset.del;
-        if (!confirm("删掉这本书？（批注也一起删）")) return;
-        await store.delBook(id);
-        const notes = await store.notesOf(id);
-        await Promise.all(notes.map((n) => store.delNote(n.id)));
-        refreshShelf();
-      }),
-    );
+    books.sort((a, b) => String(b.lastReadAt || b.createdAt || "").localeCompare(String(a.lastReadAt || a.createdAt || "")));
+    progressAll = (await store.kvGet("progress")) || {};
+    renderShelf();
   }
 
+  function renderSearch() {
+    const q = ($("searchBox").value || "").trim().toLowerCase();
+    const box = $("searchResults");
+    const list = !q
+      ? books.slice(0, 6)
+      : books.filter((b) => String(b.title || "").toLowerCase().includes(q) || String(b.author || "").toLowerCase().includes(q));
+    box.innerHTML = list.length ? "" : '<div class="hint">没找到。换个词试试，或者回书架点「＋」导入。</div>';
+    list.forEach((b) => {
+      const [c1, c2] = coverColor(b.id);
+      const row = el("div", "sr-item");
+      row.innerHTML = `<span class="sr-cover" style="background:linear-gradient(150deg,${c1},${c2})"></span>
+        <div class="sr-body"><div class="sr-title">${esc(b.title || "无题")}</div>
+        <div class="sr-meta">${esc((b.format || "txt").toUpperCase())} · ${b.chapters.length} 章 · 读到 ${bookPercent(b)}%</div></div>`;
+      row.addEventListener("click", () => openBook(b.id));
+      box.appendChild(row);
+    });
+  }
+
+  function renderMe() {
+    const c = activeCharacter();
+    const llmOk = !!(S.llm && S.llm.base && S.llm.key && S.llm.model);
+    $("llmState").textContent = llmOk ? "已配置" : "未配置";
+    const ttsBase = String((S.tts && S.tts.base) || "");
+    const ttsReady = !!ttsBase && !/127\.0\.0\.1|localhost/i.test(ttsBase);
+    $("ttsState").textContent = ttsReady ? "已配置" : "未配置";
+    $("charState").textContent = c ? c.name : "还没有";
+    const v = (S.tts.voices || []).find((x) => x.id === S.tts.activeVoiceId) || (S.tts.voices || [])[0];
+    $("meStatus").innerHTML = `<div class="me-status">
+      <b>${books.length}</b> 本书 · <b>${Object.keys(progressAll).length}</b> 本读过<br />
+      当前角色：<b>${esc(c ? c.name : "还没选")}</b><br />
+      听书音色：<b>${esc(v ? v.name : "未设置")}</b>
+    </div>`;
+    document.querySelectorAll("#meView .row-theme button").forEach((b) => b.classList.toggle("active", b.dataset.theme === (S.theme || "jinjiang")));
+  }
+
+  function switchTab(tab) {
+    document.body.classList.toggle("reading", tab === "read");
+    ["shelf", "discover", "me"].forEach((t) => $(`${t}View`).classList.toggle("hidden", t !== tab));
+    $("readView").classList.toggle("hidden", tab !== "read");
+    $("tabbar").classList.toggle("hidden", tab === "read");
+    document.querySelectorAll("#tabbar .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+    if (tab === "shelf") refreshShelf();
+    if (tab === "discover") renderSearch();
+    if (tab === "me") renderMe();
+  }
   // ────────────────────────────── 阅读 ──────────────────────────────
   let book = null;
   let chIdx = 0;
@@ -331,8 +465,7 @@
     notes = await store.notesOf(id);
     const p = progressAll[id] || {};
     chIdx = Math.min(Math.max(p.chIdx || 0, 0), book.chapters.length - 1);
-    $("shelfView").classList.add("hidden");
-    $("readView").classList.remove("hidden");
+    switchTab("read");
     $("bookTitle").textContent = book.title;
     renderChapter();
     if (p.scrollTop && p.chIdx === chIdx) {
@@ -345,9 +478,7 @@
   function backToShelf() {
     saveProgress();
     stopAudio();
-    $("readView").classList.add("hidden");
-    $("shelfView").classList.remove("hidden");
-    refreshShelf();
+    switchTab("shelf");
   }
 
   const chapterTitle = (i) => (book && book.chapters[i] ? book.chapters[i].title : "");
@@ -823,10 +954,46 @@
       renderCharacters();
       openSheet("settingsSheet");
     });
-    $("btnShelfSettings").addEventListener("click", () => {
+    $("btnImport2").addEventListener("click", () => $("fileInput").click());
+    $("btnOpenSettings").addEventListener("click", () => {
       renderCharacters();
       openSheet("settingsSheet");
     });
+    $("btnOpenLlm").addEventListener("click", () => {
+      renderCharacters();
+      openSheet("settingsSheet");
+    });
+    $("btnOpenVoices").addEventListener("click", () => {
+      renderVoices();
+      openSheet("audioSheet");
+    });
+    $("btnOpenTts").addEventListener("click", () => {
+      renderVoices();
+      openSheet("audioSheet");
+    });
+    $("btnOpenCharacters").addEventListener("click", () => {
+      renderCharacters();
+      openSheet("characterForm");
+    });
+    $("searchBox").addEventListener("input", renderSearch);
+    document.querySelectorAll("#heroTabs .htab").forEach((b) =>
+      b.addEventListener("click", () => {
+        shelfFilter = b.dataset.filter;
+        renderShelf();
+      }),
+    );
+    document.querySelectorAll("#tabbar .tab").forEach((b) =>
+      b.addEventListener("click", () => switchTab(b.dataset.tab)),
+    );
+    document.querySelectorAll("#meView .row-theme button").forEach((b) =>
+      b.addEventListener("click", () => {
+        S.theme = b.dataset.theme;
+        saveSettings();
+        applyLook();
+        renderMe();
+        document.querySelectorAll("#segTheme button").forEach((x) => x.classList.toggle("active", x.dataset.theme === S.theme));
+      }),
+    );
     document.querySelectorAll("[data-close]").forEach((b) =>
       b.addEventListener("click", () => closeSheet(b.dataset.close)),
     );
