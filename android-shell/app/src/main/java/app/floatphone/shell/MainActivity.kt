@@ -551,7 +551,6 @@ class MainActivity : AppCompatActivity() {
         )
         pendingShareText = null
     }
-}
 
     /**
      * 取出本次要加载的站内地址。两个来源：
