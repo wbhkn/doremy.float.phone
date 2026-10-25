@@ -4,6 +4,8 @@ import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle
 import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, getSystemInstructionDisplayContent, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, resolveChatBackgroundImage, resolveChatUserAvatar } from "@/lib/chat-storage";
 import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXmlTagBlocks } from "@/lib/stream-preview";
 import type { StateValue } from "@/lib/chat-storage";
+import { extractBiliLink, buildBiliCardFromText } from "@/lib/bilibili-card";
+import { readIncomingShare, clearIncomingShare } from "@/components/incoming-share-registrar";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
 import { parseAIResponse, type ParsedMessagePart } from "@/lib/rich-message-parser";
 import { isKnownStickerLabel } from "@/lib/sticker-data";
@@ -717,6 +719,22 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 }, ref) {
     const [inputText, setInputText] = useState("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+    // 从系统「分享」菜单进来的文字（B 站分享就是标题 + 链接）：
+    // 挂载时取一次，塞进输入框等用户确认——不替用户直接发出去。
+    useEffect(() => {
+        const pending = readIncomingShare();
+        if (!pending) return;
+        clearIncomingShare();
+        setInputText(prev => (prev.trim() ? `${prev}\n${pending.text}` : pending.text));
+        requestAnimationFrame(() => {
+            const ta = textareaRef.current;
+            if (!ta) return;
+            ta.style.height = "auto";
+            ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+            ta.focus();
+        });
+    }, []);
 
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
@@ -3101,6 +3119,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             audio: "发了一条语音",
             music_share: "分享了音乐",
             xiaohongshu_note_share: "分享了一条小红书帖子",
+            bilibili_video_share: "分享了一条 B 站视频",
             app_card: "分享了一张应用卡片",
             quote: "引用回复",
         };
@@ -3117,6 +3136,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             if (m.mediaType === "audio") return `发了一条语音: ${m.mediaData?.label || ""}`.trim();
             if (m.mediaType === "music_share") return `分享了音乐: ${m.mediaData?.musicTitle || ""}`.trim();
             if (m.mediaType === "xiaohongshu_note_share") return `分享了一条小红书帖子: ${m.mediaData?.xiaohongshuTitle || ""}`.trim();
+            if (m.mediaType === "bilibili_video_share") {
+                const t = m.mediaData?.biliTitle || "";
+                const up = m.mediaData?.biliUp || "";
+                return t ? `分享了一条 B 站视频: 《${t}》${up ? ` · ${up}` : ""}` : "分享了一条 B 站视频";
+            }
             if (m.mediaType === "app_card") return `分享了${m.mediaData?.appName || "APP"}卡片: ${m.mediaData?.appCardTitle || m.mediaData?.appCardSummary || ""}`.trim();
             if (m.mediaType === "quote") return `引用回复: ${m.mediaData?.quotePreview || ""}`.trim();
             if (m.mediaType === "payment_request") return `发起了代付请求: ${m.mediaData?.paymentRequestAmountLabel || m.mediaData?.amount || ""}`.trim();
@@ -4142,15 +4166,47 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const diceOnly = !isQuoting && isDiceOnlyMessage(currentText);
             const diceFace = diceOnly ? rollChatDiceFace() : 0;
 
+            // 贴了一条 B 站链接：先出气泡，再去取真实标题/封面（取不到就留一条普通链接）
+            const biliLink = !diceOnly && !isQuoting ? extractBiliLink(currentText) : "";
+
             const newMsg = pushChatMessage({
                 sessionId: session.id,
                 role: "user",
                 content: currentText,
-                mediaType: diceOnly ? "dice" : isQuoting ? "quote" : undefined,
-                mediaData: diceOnly ? { diceFace } : isQuoting ? quoteData : undefined,
+                mediaType: diceOnly ? "dice" : isQuoting ? "quote" : biliLink ? "bilibili_video_share" : undefined,
+                mediaData: diceOnly
+                    ? { diceFace }
+                    : isQuoting
+                      ? quoteData
+                      : biliLink
+                        ? { biliPending: true, label: "B 站视频" }
+                        : undefined,
             });
 
             setMessages(prev => [...prev, newMsg]);
+
+            if (biliLink) {
+                void buildBiliCardFromText(currentText).then(card => {
+                    if (!card) {
+                        // 取不到就退回普通文字气泡，别让用户发出去一条空卡
+                        updateMessageMediaData(newMsg.id, undefined);
+                        setMessages(prev => prev.map(m => (m.id === newMsg.id ? { ...m, mediaType: undefined, mediaData: undefined } : m)));
+                        return;
+                    }
+                    const mediaData = {
+                        biliPending: false,
+                        biliBvid: card.bvid,
+                        biliTitle: card.title,
+                        biliUp: card.up,
+                        biliCover: card.pic,
+                        biliDuration: card.duration,
+                        biliView: card.view,
+                        label: card.title,
+                    };
+                    updateMessageMediaData(newMsg.id, mediaData);
+                    setMessages(prev => prev.map(m => (m.id === newMsg.id ? { ...m, mediaData } : m)));
+                });
+            }
             if (diceOnly) {
                 const diceAside = pushChatMessage({
                     sessionId: session.id,

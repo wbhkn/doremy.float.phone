@@ -20,7 +20,7 @@ import { loadDiaryEntries } from "./diary-entry-storage";
 import type { DiaryEntry, DiaryEntryBlock } from "./diary-entry-types";
 import { loadNoteWallProjectionEntries } from "./notewall-memory";
 import { loadXiaohongshuProjectionEntries } from "./xiaohongshu-memory";
-import { formatXiaohongshuShareForPrompt } from "./chat-share";
+import { formatXiaohongshuShareForPrompt, formatBilibiliShareForPrompt } from "./chat-share";
 import { loadBlackMarketTheaterProjectionEntries } from "./black-market-storage";
 import { loadInterviewMagazineProjectionEntries } from "./interview-magazine-memory";
 import { loadCoCreateProjectionEntries } from "./cocreate-memory";
@@ -256,6 +256,13 @@ export function loadNativeTimeline(
                     body: msg.mediaData?.xiaohongshuBody,
                     description: msg.mediaData?.xiaohongshuDescription,
                 });
+                else if (msg.mediaType === "bilibili_video_share") content = formatBilibiliShareForPrompt({
+                    bvid: msg.mediaData?.biliBvid,
+                    title: msg.mediaData?.biliTitle,
+                    up: msg.mediaData?.biliUp,
+                    duration: msg.mediaData?.biliDuration,
+                    view: msg.mediaData?.biliView,
+                });
                 else if (msg.mediaType === "location") content = `[位置:${msg.mediaData?.label || ""}]`;
             }
 
@@ -369,6 +376,13 @@ export function loadNativeTimeline(
                     title: msg.mediaData?.xiaohongshuTitle,
                     body: msg.mediaData?.xiaohongshuBody,
                     description: msg.mediaData?.xiaohongshuDescription,
+                });
+                else if (msg.mediaType === "bilibili_video_share") content = formatBilibiliShareForPrompt({
+                    bvid: msg.mediaData?.biliBvid,
+                    title: msg.mediaData?.biliTitle,
+                    up: msg.mediaData?.biliUp,
+                    duration: msg.mediaData?.biliDuration,
+                    view: msg.mediaData?.biliView,
                 });
                 else if (msg.mediaType === "media_file") {
                     const ft = msg.mediaData?.fileType;

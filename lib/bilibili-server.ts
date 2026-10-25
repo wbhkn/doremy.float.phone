@@ -325,6 +325,8 @@ async function actionVideo(query: Record<string, string>): Promise<BiliActionRes
         up: trim(owner.name, 40),
         up_mid: num(owner.mid),
         desc: trim(data.desc, 600),
+        // 封面：聊天里要画真实视频卡片，缺了它卡片就只剩一行字
+        pic: String(data.pic || "").replace(/^http:/, "https:"),
         duration: formatDuration(num(data.duration)),
         pubdate: data.pubdate
             ? new Date(num(data.pubdate) * 1000).toISOString().slice(0, 16).replace("T", " ")
@@ -455,7 +457,73 @@ const ACTIONS = [
     "online",
     "user",
     "me",
+    "resolve",
 ] as const;
+
+const BV_PATTERN = /BV[0-9A-Za-z]{10}/;
+const AV_PATTERN = /(?:^|[^0-9])av(\d+)/i;
+
+function extractBvid(text: string): string {
+    const matched = BV_PATTERN.exec(String(text || ""));
+    return matched ? matched[0] : "";
+}
+
+/**
+ * 把一条分享链接/分享文案解析成 bvid。
+ *
+ * 为什么需要服务端：B 站 App 的「分享 → 复制链接」给的是 b23.tv 短链，
+ * 短链的 BV 号藏在 302 跳转后的地址里，浏览器直接 fetch 会被跨域拦掉。
+ * 这里只发 HEAD/GET 跟一次跳转，拿到最终 URL 就够。
+ */
+async function actionResolve(query: Record<string, string>): Promise<BiliActionResult> {
+    const rawUrl = String(query.url || "").trim();
+    if (!rawUrl) {
+        return { ok: false, action: "resolve", reason: "bad_request", message: "缺少链接" };
+    }
+    const direct = extractBvid(rawUrl);
+    if (direct) {
+        return { ok: true, action: "resolve", bvid: direct, url: `https://www.bilibili.com/video/${direct}` };
+    }
+    // 只允许 B 站自家的域名，避免被当成任意 URL 抓取器
+    let target: URL;
+    try {
+        target = new URL(rawUrl);
+    } catch {
+        return { ok: false, action: "resolve", reason: "bad_request", message: "链接格式不对" };
+    }
+    if (!/(^|\.)(bilibili\.com|b23\.tv|bili2233\.cn)$/.test(target.hostname)) {
+        return { ok: false, action: "resolve", reason: "bad_request", message: "不是 B 站链接" };
+    }
+    try {
+        const res = await fetch(target.toString(), {
+            method: "GET",
+            redirect: "follow",
+            headers: { "User-Agent": UA },
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        const finalUrl = res.url || "";
+        const fromRedirect = extractBvid(finalUrl);
+        if (fromRedirect) {
+            return { ok: true, action: "resolve", bvid: fromRedirect, url: `https://www.bilibili.com/video/${fromRedirect}` };
+        }
+        const avMatch = AV_PATTERN.exec(finalUrl) || AV_PATTERN.exec(await res.text());
+        if (avMatch) {
+            const view = await fetchViewRaw(`av${avMatch[1]}`);
+            const bvid = trim(view?.bvid, 24);
+            if (bvid) {
+                return { ok: true, action: "resolve", bvid, url: `https://www.bilibili.com/video/${bvid}` };
+            }
+        }
+        return {
+            ok: false,
+            action: "resolve",
+            reason: "bad_request",
+            message: "这个链接里没找到视频号（可能是专栏、番剧或已删除）",
+        };
+    } catch {
+        return { ok: false, action: "resolve", reason: "upstream_unreachable", message: "短链打不开，可能过期了" };
+    }
+}
 
 /**
  * 登录态自检（设置页「测试登录」用）。
@@ -544,6 +612,9 @@ async function runBiliActionInner(
                 break;
             case "me":
                 payload = await actionMe();
+                break;
+            case "resolve":
+                payload = await actionResolve(query);
                 break;
             default:
                 payload = { ok: false, action: key, reason: "unknown_action", message: "动作不可用" };

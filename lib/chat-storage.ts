@@ -127,6 +127,7 @@ export type ChatMessage = {
         | "payment_request" | "accept_payment_request" | "decline_payment_request"
         | "music" | "music_share" | "music_notify" | "music_not_found"
         | "xiaohongshu_note_share"
+        | "bilibili_video_share"
         | "gift"
         | "contact_card"
         | "app_card"
@@ -216,6 +217,14 @@ export type ChatMessage = {
         blacklistUserName?: string;      // 拉黑事件发生时的用户名（用于事件详情与上下文）
         musicTitle?: string;      // 音乐标题
         musicArtist?: string;     // 音乐歌手
+        // ── B 站视频分享（真实视频卡片，数据在发消息那一刻取一次并落库）──
+        biliBvid?: string;        // BV 号
+        biliTitle?: string;       // 视频标题
+        biliUp?: string;          // UP 主
+        biliCover?: string;       // 封面地址（i0/i1.hdslb.com）
+        biliDuration?: string;    // 时长，如 03:21
+        biliView?: number;        // 播放量（原始数字，渲染时再格式化）
+        biliPending?: boolean;    // 正在取视频信息（先出气泡，数据到了再填）
         xiaohongshuAuthor?: string;       // 小红书分享作者
         xiaohongshuTitle?: string;        // 小红书分享标题
         xiaohongshuBody?: string;         // 小红书分享正文
@@ -568,6 +577,7 @@ const MEDIA_PREVIEW_MAP: Record<string, string> = {
     music: "[音乐]",
     music_share: "[音乐分享]",
     xiaohongshu_note_share: "[小红书分享]",
+    bilibili_video_share: "[B站视频]",
     app_card: "[应用卡片]",
     tool_notice: "[执行动作]",
     system_instruction: "[系统指令]",

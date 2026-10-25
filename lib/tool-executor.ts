@@ -23,7 +23,7 @@ import {
 } from "./tool-storage";
 import { executeCustomAppToolCall } from "./custom-app-tool-runtime";
 import { characterWorkspace, agentComputerRequest, isAgentComputerConfigured } from "./agent-computer";
-import { BILIBILI_BROWSE_CAPABILITY_ID, biliApiCall, biliUserNotice, formatBiliResult } from "./bilibili-tool";
+import { BILIBILI_BROWSE_CAPABILITY_ID, biliApiCall, biliUserNotice, formatBiliResult, shareBilibiliVideoToChat } from "./bilibili-tool";
 import { AGENT_COMPUTER_CAPABILITY_ID, CHECK_IN_REQUEST_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, DEVICE_ACTION_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, PERCEPTION_READ_CAPABILITY_ID, PHONE_WIDGET_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, SYSTEM_CALENDAR_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
 import {
     checkQueryCooldown,
@@ -2644,8 +2644,24 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
         const mid = String(args.mid ?? "").trim();
         if (!mid) return failed("看 UP 主主页需要 mid（视频详情里的 up_mid）");
         params.mid = mid;
+    } else if (action === "share") {
+        if (!bvid) return failed("要分享得给视频号 bvid（BV 开头）");
+        const shared = await shareBilibiliVideoToChat({ sessionId: context?.sessionId, bvid });
+        if (!shared.ok) {
+            return failed(shared.message || "分享失败", "📺 这条视频没分享出去");
+        }
+        const title = shared.title || "";
+        const up = shared.up || "";
+        return {
+            name: call.name,
+            success: true,
+            data: `已经把《${title}》${up ? `（UP：${up}）` : ""}分享到聊天里了，{{user}}那边会看到一张带封面的视频卡片。你可以接着说一句你为什么想给 TA 看这个。`,
+            continueConversation: true,
+            persistToHistory: false,
+            userNotice: `📺 把《${title.slice(0, 24)}》分享给了你`,
+        };
     } else {
-        return failed("action 只能是 feed / popular / ranking / search / video / comments / related / online / user");
+        return failed("action 只能是 feed / popular / ranking / search / video / comments / related / online / user / share");
     }
 
     const response = await biliApiCall(action, params);

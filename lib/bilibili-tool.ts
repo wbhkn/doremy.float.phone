@@ -19,13 +19,13 @@ export const BILIBILI_PARAMETER_SCHEMA = JSON.stringify({
     properties: {
         action: {
             type: "string",
-            enum: ["feed", "popular", "ranking", "search", "video", "comments", "related", "online", "user"],
+            enum: ["feed", "popular", "ranking", "search", "video", "comments", "related", "online", "user", "share"],
             description:
-                "要做什么：feed=推荐流（最像真的在刷，想换一批就把 fresh_idx 加 1）；popular=热门；ranking=排行榜；search=搜视频；video=看某个视频的详情、简介、数据；comments=看这个视频的评论；related=看相关推荐（顺着一路刷下去）；online=看此刻有多少人一起在看；user=看某个 UP 主的主页和最近投稿",
+                "要做什么：feed=推荐流（最像真的在刷，想换一批就把 fresh_idx 加 1）；popular=热门；ranking=排行榜；search=搜视频；video=看某个视频的详情、简介、数据；comments=看这个视频的评论；related=看相关推荐（顺着一路刷下去）；online=看此刻有多少人一起在看；user=看某个 UP 主的主页和最近投稿；share=把某条视频真的分享到聊天里给{{user}}看（会发出一张带真实封面的卡片）",
         },
         bvid: {
             type: "string",
-            description: "视频号，形如 BV1xx411c7mD。video / comments / related / online 需要",
+            description: "视频号，形如 BV1xx411c7mD。video / comments / related / online / share 需要",
         },
         keyword: {
             type: "string",
@@ -61,6 +61,7 @@ export const BILIBILI_USAGE_GUIDE = [
     "怎么用才像真的在刷：不要一次把所有标题念给{{user}}听；挑你真感兴趣的 1-2 条，看完说说你的感受、吐槽、联想到的事，再自然地说你在 B 站看到什么。",
     "如果这台手机配了{{user}}自己的 B 站账号，feed 就是 TA 账号的推荐流——就像你拿 TA 的手机随手刷。看到和 TA 有关的内容可以提一句，但别把 TA 的收藏/历史当谈资逐条汇报。",
     "参数要点：bvid 是视频号（BV 开头）；user 要 mid（数字 id，video 结果里的 up_mid）；排行榜可带 rid 选分区；一次 ps 不要超过 20。",
+    "【分享】真看到有意思的视频、想让{{user}}也看一眼时，用 action=share + bvid——聊天里会直接出现一张带真实封面的卡片。分享前先看一眼它是什么（别把没看过的视频丢过去），一次对话里最多分享一两条。",
     "【边界】遇到「风控」类报错说明 B 站这次按频率拦了（隔一两分钟再试，别连着重试）；一次对话里别刷太多轮，看几条就够了。",
 ].join("\n");
 
@@ -254,5 +255,52 @@ export function biliUserNotice(action: string, data: BiliResponse, args: Record<
     if (action === "ranking") return "📺 在 B 站看排行榜";
     if (action === "user") return "📺 在 B 站翻 UP 主主页";
     if (action === "online") return "📺 在 B 站看有多少人一起看";
+    if (action === "share" && title) return `📺 把《${title.slice(0, 24)}》分享给了你`;
     return "📺 在 B 站逛了逛";
+}
+
+/**
+ * 角色主动分享：把一条真实视频变成聊天里的卡片消息。
+ *
+ * 只做「取一次真实数据 + 落一条消息」这两件事——不生成台词。
+ * 台词由模型在工具返回后自己接着说的话负责（continueConversation），
+ * 这样分享动作和角色说话的语气能接上。
+ */
+export async function shareBilibiliVideoToChat(input: {
+    sessionId?: string;
+    bvid: string;
+}): Promise<{ ok: boolean; title?: string; up?: string; message?: string; reason?: string }> {
+    const sessionId = String(input.sessionId || "");
+    const bvid = String(input.bvid || "").trim();
+    if (!sessionId) return { ok: false, reason: "bad_request", message: "不知道分享到哪个会话" };
+    if (!/^BV[0-9A-Za-z]{10}$/.test(bvid)) return { ok: false, reason: "bad_request", message: "bvid 格式不对" };
+
+    const data = await biliApiCall("video", { bvid });
+    if (!data.ok) {
+        return {
+            ok: false,
+            reason: data.reason || "upstream_error",
+            message: data.message || "没能取到这条视频的信息",
+        };
+    }
+    const title = typeof data.title === "string" ? data.title : "";
+    const up = typeof data.up === "string" ? data.up : "";
+    // 动态引入：避免 chat-storage 与工具层在模块初始化时互相牵住
+    const { pushChatMessage } = await import("./chat-storage");
+    pushChatMessage({
+        sessionId,
+        role: "assistant",
+        content: "",
+        mediaType: "bilibili_video_share",
+        mediaData: {
+            biliBvid: bvid,
+            biliTitle: title,
+            biliUp: up,
+            biliCover: typeof data.pic === "string" ? data.pic : "",
+            biliDuration: typeof data.duration === "string" ? data.duration : "",
+            biliView: Number(data.view) || 0,
+            label: title || "B 站视频",
+        },
+    });
+    return { ok: true, title, up };
 }

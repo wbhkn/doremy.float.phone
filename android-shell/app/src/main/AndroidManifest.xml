@@ -145,6 +145,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="floatshell" />
             </intent-filter>
+
+            <!-- 系统「分享」菜单：B 站/微博/浏览器等把文字或链接分享到「小手机」。
+                 只收文本（视频链接就是文本），收下后交给网页塞进输入框。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
 

@@ -122,6 +122,8 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
             return <MediaFileBubble msg={msg} onUpdate={onUpdate} characterId={characterId} />;
         case "xiaohongshu_note_share":
             return <XiaohongshuShareBubble msg={msg} />;
+        case "bilibili_video_share":
+            return <BilibiliShareBubble msg={msg} />;
         case "audio":
             return <VoiceMessageBubble msg={msg} characterId={characterId} onUpdate={onUpdate} defaultTranslationExpanded={defaultTranslationExpanded} />;
         case "meeting_invite":
@@ -2317,6 +2319,63 @@ function XiaohongshuShareBubble({ msg }: { msg: ChatMessage }) {
             ) : null}
         </div>
     );
+}
+
+/**
+ * 真实 B 站视频分享卡片。
+ *
+ * 数据是发消息那一刻通过 /api/bili/video 取回来并写进 mediaData 的，
+ * 所以断网、B 站风控、以后视频被删都不影响这张卡还能看。
+ * 封面上 B 站会校验 Referer，这里用 referrerPolicy="no-referrer" 让它直接给图。
+ */
+function BilibiliShareBubble({ msg }: { msg: ChatMessage }) {
+    const data = msg.mediaData;
+    const bvid = data?.biliBvid || "";
+    const title = data?.biliTitle || "";
+    const up = data?.biliUp || "";
+    const cover = data?.biliCover || "";
+    const duration = data?.biliDuration || "";
+    const view = Number(data?.biliView) || 0;
+    const pending = Boolean(data?.biliPending) && !title;
+    const url = bvid ? `https://www.bilibili.com/video/${bvid}` : "";
+
+    const openVideo = () => {
+        if (!url) return;
+        window.open(url, "_blank", "noopener");
+    };
+
+    return (
+        <div
+            className={`chat-bili-share-card${pending ? " chat-bili-share-card--pending" : ""}`}
+            role={url ? "link" : undefined}
+            onClick={openVideo}
+        >
+            <div className="chat-bili-share-cover">
+                {cover ? (
+                    <img src={cover} alt="" referrerPolicy="no-referrer" loading="lazy" />
+                ) : null}
+                <span className="chat-bili-share-play">▶</span>
+                {duration ? <span className="chat-bili-share-duration">{duration}</span> : null}
+            </div>
+            <div className="chat-bili-share-info">
+                <div className="chat-bili-share-title">
+                    {title || (pending ? msg.content.replace(/https?:\/\/\S+/g, "").trim() || "正在取视频信息…" : "B 站视频")}
+                </div>
+                <div className="chat-bili-share-meta">
+                    <span className="chat-bili-share-mark">BILIBILI</span>
+                    {up ? <span className="chat-bili-share-up">{up}</span> : null}
+                    {view ? <span className="chat-bili-share-view">{formatBiliView(view)}播放</span> : null}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function formatBiliView(value: number): string {
+    const n = Number(value) || 0;
+    if (n >= 100000000) return `${(n / 100000000).toFixed(1)}亿`;
+    if (n >= 10000) return `${(n / 10000).toFixed(1)}万`;
+    return String(n);
 }
 
 // ── Voice Message ───────────────────────────────

@@ -10,6 +10,7 @@ import { WidgetScheduler } from "@/components/widget/widget-scheduler";
 import { CheckInScheduler } from "@/components/screenshot/checkin-scheduler";
 import { MediaMaintenanceScheduler } from "@/components/media-maintenance-scheduler";
 import { ShellPushRegistrar } from "@/components/shell-push-registrar";
+import { IncomingShareRegistrar } from "@/components/incoming-share-registrar";
 import { DesktopShell } from "./desktop-shell";
 import { OfflinePushRevampAnnouncement } from "./offline-push-revamp-announcement";
 import { SplashAnimation } from "./splash-animation";
@@ -330,6 +331,8 @@ export function MainApp() {
             <MediaMaintenanceScheduler />
             {/* 壳推送订阅的兜底注册：壳原生那次失败是静默的，这里可验证地补一次 */}
             <ShellPushRegistrar />
+            {/* 系统「分享」菜单进来的文本（B 站等）：收下存起来，聊天室挂载时取走 */}
+            <IncomingShareRegistrar />
           </MusicProvider>
         </main>
       )}

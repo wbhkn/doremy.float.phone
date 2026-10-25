@@ -17,6 +17,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import org.json.JSONObject
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
@@ -57,7 +58,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         val SITE_URL: String = BuildConfig.SITE_URL
-        const val VERSION = "1.0.20"
+        const val VERSION = "1.0.21"
         /** 来电接听等场景的站内深链（必须以 SITE_URL 开头，否则忽略） */
         const val EXTRA_OPEN_URL = "open_url"
         /** 外部 App（如桌宠）唤起本壳用的自定义 scheme：floatshell://open?url=<站内地址> */
@@ -150,6 +151,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rootContainer: FrameLayout
     private lateinit var webView: WebView
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    /** 系统「分享」菜单送来的文本，等页面能跑 JS 后再交给输入框 */
+    private var pendingShareText: String? = null
 
     /** 系统状态栏实际高度（CSS px，即物理像素 / density），实时更新。 */
     @Volatile
@@ -420,6 +424,8 @@ class MainActivity : AppCompatActivity() {
                 // 二次注入是兜底：onPageStarted 时新文档还未必可执行 JS，
                 // 有些站点（含本站的 App Router）会在首帧就检查 Notification。
                 injectNotificationPolyfill()
+                // 从系统「分享」菜单进来的文本，等页面能跑 JS 了再交给网页
+                deliverPendingShare()
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -501,6 +507,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         // 冷启动带深链（如来电接听）直接加载目标；否则加载首页
+        pendingShareText = consumeShareText(intent)
         webView.loadUrl(consumeOpenUrl(intent) ?: SITE_URL)
         ensurePushService()
     }
@@ -509,10 +516,42 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 系统分享：页面已经加载好了，直接塞给网页
+        val shared = consumeShareText(intent)
+        if (shared != null) {
+            pendingShareText = shared
+            deliverPendingShare()
+        }
         val target = consumeOpenUrl(intent) ?: return
         // SPA 已加载：loadUrl 到同页 hash 只触发 hashchange，不会整页重载
         webView.loadUrl(target)
     }
+
+    /**
+     * 取出系统「分享」发来的文本（B 站分享就是一段带链接的文字）。
+     * 取走后清空，免得重建 Activity 时重复塞一遍。
+     */
+    private fun consumeShareText(intent: Intent?): String? {
+        if (intent == null) return null
+        if (intent.action != Intent.ACTION_SEND) return null
+        val type = intent.type.orEmpty()
+        if (!type.startsWith("text/")) return null
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+        intent.action = null
+        return text.ifEmpty { null }
+    }
+
+    /** 把待处理的分享文本交给网页的输入框（网页侧是 window.__floatIncomingShare） */
+    private fun deliverPendingShare() {
+        val text = pendingShareText ?: return
+        val payload = JSONObject.quote(text)
+        webView.evaluateJavascript(
+            "window.__floatIncomingShare && window.__floatIncomingShare($payload)",
+            null,
+        )
+        pendingShareText = null
+    }
+}
 
     /**
      * 取出本次要加载的站内地址。两个来源：

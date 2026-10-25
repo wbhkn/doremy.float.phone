@@ -10,7 +10,7 @@ import type { RecentBlock, UnifiedRecentItem } from "./short-term-assembler";
 import { readDwellingLayoutCache } from "./dwelling-storage";
 import { formatDwellingContext } from "./dwelling-engine";
 import { matchesActiveTags } from "./content-tag-utils";
-import { formatXiaohongshuShareForPrompt } from "./chat-share";
+import { formatXiaohongshuShareForPrompt, formatBilibiliShareForPrompt } from "./chat-share";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
 import { formatPromptTimestamp, getPromptTimestampOptionsForTimeContext, resolvePromptTimeAware, type PromptTimestampOptions } from "./prompt-time";
 import { formatCharacterRelationsForPrompt } from "./character-world-storage";
@@ -1233,6 +1233,14 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
                 title: d?.xiaohongshuTitle,
                 body: d?.xiaohongshuBody,
                 description: d?.xiaohongshuDescription,
+            });
+        case "bilibili_video_share":
+            return formatBilibiliShareForPrompt({
+                bvid: d?.biliBvid,
+                title: d?.biliTitle,
+                up: d?.biliUp,
+                duration: d?.biliDuration,
+                view: d?.biliView,
             });
         case "accept_red_packet":
             if (isGroup && d?.claimer && d?.owner) return `[${d.claimer}领取了${d.owner}的红包]`;
