@@ -13,6 +13,7 @@ import {
     isCloudBackupConfigured,
     loadCloudBackupConfig,
     normalizeBackupUrl,
+    PRESET_CLOUD_BACKUP_URL,
     saveCloudBackupConfig,
 } from "@/lib/cloud-backup/config";
 import { testCloudBackupConnection } from "@/lib/cloud-backup/storage-client";
@@ -154,8 +155,9 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
     const [resultDialog, setResultDialog] = useState<{ title: string; text: string } | null>(null);
     const [progress, setProgress] = useState("");
     // 换设备重连：填部署时的项目地址 + service_role key，探测既有云服务并恢复本机状态
+    // 自托管站点已经有唯一的项目地址，预填好，用户只需要贴 key。
     const [connectOpen, setConnectOpen] = useState(false);
-    const [connectUrl, setConnectUrl] = useState("");
+    const [connectUrl, setConnectUrl] = useState(PRESET_CLOUD_BACKUP_URL);
     const [connectKey, setConnectKey] = useState("");
     // 一键排查：把「哪一段断了」变成可见结论，而不是反复猜。
     const [checking, setChecking] = useState(false);
@@ -395,15 +397,20 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         try {
             // ① 云备份：测通即写入配置（保留自动备份等既有设置项）
             setProgress("连接云备份…");
+            const previous = loadCloudBackupConfig();
             const nextConfig = {
-                ...loadCloudBackupConfig(),
+                ...previous,
                 url: normalizeBackupUrl(connectUrl),
                 key: connectKey.trim(),
+                // 换设备重连的真实诉求就是「别再丢数据」：连上就自动开备份（间隔沿用本机设置）。
+                enabled: true,
             };
             const test = await testCloudBackupConnection(nextConfig);
             if (!test.ok) throw new Error(`云备份连接失败：${test.error}`);
             saveCloudBackupConfig(nextConfig);
-            lines.push("云备份：已连接 ✓");
+            // 顺手把浏览器存储标记成「持久」，避免空间紧张时被清掉（旧浏览器不支持则忽略）。
+            void navigator.storage?.persist?.().catch(() => undefined);
+            lines.push("云备份：已连接 ✓（自动备份已开启）");
 
             // ② 离线推送：健康检查通过就地恢复状态，并迁移本设备的推送订阅
             setProgress("探测离线推送…");
@@ -750,9 +757,10 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                         <div className="modal-body flex flex-col gap-3">
                             <h3 className="modal-title">连接已有云服务</h3>
                             <div className="menu-desc !mt-0 rounded-[14px] bg-black/[0.03] px-3 py-2.5">
-                                云端的项目、函数和数据都还在，换设备只是本机丢了连接。填部署时的项目地址和
-                                service_role key（Supabase 控制台 Settings → API 可查），一键探测并接上，
-                                不需要 Access Token，也不会重新部署。
+                                云端的项目、函数和数据都还在，换设备只是本机丢了连接。项目地址已经预填好，
+                                只需贴部署时的 service_role key（Supabase 控制台 Settings → API 可查）。
+                                连上后<strong>自动开启云备份</strong>（每 6 小时一次，可改），
+                                以后浏览器存储被清也能从云端恢复，不需要 Access Token，也不会重新部署。
                             </div>
                             <label className="flex flex-col gap-1">
                                 <span className="menu-desc !mt-0">Supabase 项目地址</span>

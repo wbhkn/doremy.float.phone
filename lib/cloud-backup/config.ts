@@ -3,6 +3,13 @@ import { kvGet, kvSet, registerKvMigration } from "../kv-db";
 /** Fixed bucket name — users never type this; the app auto-creates it via the service_role key. */
 export const CLOUD_BACKUP_BUCKET = "ai-phone-backup";
 
+/**
+ * 本站自托管时预置的 Supabase 项目地址。
+ * 只预填地址、不预填 key：service_role 是敏感密钥，绝不能进公开的构建产物。
+ * 用户在「换了设备只需重新连接」里只需要贴一串 key，地址已经填好。
+ */
+export const PRESET_CLOUD_BACKUP_URL = "https://uaolzgbiuywqxbalofgm.supabase.co";
+
 const CLOUD_BACKUP_CONFIG_KEY = "ai_phone_cloud_backup_config_v1";
 registerKvMigration(CLOUD_BACKUP_CONFIG_KEY);
 
