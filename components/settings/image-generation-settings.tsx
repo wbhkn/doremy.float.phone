@@ -817,6 +817,9 @@ export function ImageGenerationSettings() {
                                 onChange={(event) => updateOpenAiPreset({ baseUrl: event.target.value })}
                                 placeholder="https://api.example.com/v1"
                             />
+                            <p className="menu-desc ml-1 opacity-70">
+                                填接口根路径（通常以 <b>/v1</b> 结尾）。如果用 ngrok / cloudflared 之类的隧道，隧道断了或地址换了就会报 404——这里会直接说明是隧道问题。
+                            </p>
                         </div>
 
                         <div className="flex flex-col gap-1">

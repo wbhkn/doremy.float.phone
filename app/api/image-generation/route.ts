@@ -63,6 +63,23 @@ function buildImageUrl(baseUrl: string, mode: "generations" | "edits"): string {
   return `${normalizeBaseUrl(trimmed)}/images/${mode}`;
 }
 
+const HTML_ERROR_RE = /^\s*<(?:!doctype|html|head|body)/i;
+
+function isTunnelUrl(url: string): boolean {
+  return /ngrok|trycloudflare|localtunnel|loca\.lt/i.test(url);
+}
+
+/** 上游返回网页而不是 JSON 时给一句能直接照做的说明，别把 600 字 HTML 甩给用户。 */
+function friendlyInterfaceError(status: number, url: string): string {
+  if (/ngrok/i.test(url)) {
+    return `生图接口返回的是 ngrok 的网页（HTTP ${status}）：这条 ngrok 隧道现在没连到你的服务——要么隧道已经断开，要么免费版重启后地址变了。请重新启动 ngrok，把新的 https 地址填回 Base URL，再点「测试生图」。`;
+  }
+  if (isTunnelUrl(url)) {
+    return `生图接口返回的是隧道服务商的网页（HTTP ${status}）：隧道可能已断开或地址已更换。请检查隧道进程，并把新地址填回 Base URL。`;
+  }
+  return `生图接口返回的是网页而不是 JSON（HTTP ${status}）：地址可能填错，或指到了登录页/提示页。请确认 Base URL 是接口根路径（通常以 /v1 结尾）。`;
+}
+
 function dataUrlToBlob(dataUrl: string): { blob: Blob; mimeType: string } | null {
   const match = /^data:([^;]+);base64,([\s\S]+)$/.exec(dataUrl);
   if (!match) return null;
@@ -124,9 +141,15 @@ function extractFromObject(data: unknown): ExtractedImage | null {
 
 async function externalFetch(url: string, init: RequestInit): Promise<Response> {
   const dispatcher = getProxyDispatcher();
+  const headers = new Headers(init.headers || {});
+  // ngrok 免费隧道会给浏览器塞一张 HTML 警告页，API 客户端必须显式跳过。
+  if (/ngrok/i.test(url) && !headers.has("ngrok-skip-browser-warning")) {
+    headers.set("ngrok-skip-browser-warning", "true");
+  }
+  const nextInit: RequestInit = { ...init, headers };
   return dispatcher
-    ? fetch(url, { ...init, dispatcher } as RequestInit & { dispatcher: Dispatcher })
-    : fetch(url, init);
+    ? fetch(url, { ...nextInit, dispatcher } as RequestInit & { dispatcher: Dispatcher })
+    : fetch(url, nextInit);
 }
 
 async function fetchImageUrl(url: string): Promise<{ b64: string; mimeType: string }> {
@@ -344,7 +367,16 @@ async function runImageGeneration(input: ImageGenerationRequest): Promise<{ stat
     const contentType = (res.headers.get("content-type") || "").toLowerCase();
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
+      if (HTML_ERROR_RE.test(errText) || contentType.includes("text/html")) {
+        return { status: 502, body: { error: friendlyInterfaceError(res.status, url) } };
+      }
       return { status: 502, body: { error: `生图 API 错误 ${res.status}: ${errText.slice(0, 600)}` } };
+    }
+
+    if (contentType.includes("text/html")) {
+      const errText = await res.text().catch(() => "");
+      if (HTML_ERROR_RE.test(errText)) return { status: 502, body: { error: friendlyInterfaceError(res.status, url) } };
+      return { status: 502, body: { error: "生图接口返回的是网页而不是 JSON，请检查 Base URL 是否指向接口根路径。" } };
     }
 
     if (contentType.startsWith("image/")) {

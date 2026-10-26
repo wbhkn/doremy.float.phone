@@ -160,6 +160,24 @@ function buildModelsUrl(baseUrl: string): string {
   return `${normalizeBaseUrl(trimmed)}/models`;
 }
 
+const HTML_ERROR_RE = /^\s*<(?:!doctype|html|head|body)/i;
+
+/** 接口地址是不是隧道（ngrok/cloudflared 之类）：这类地址最常见的两种失败是隧道断了、地址换了。 */
+function isTunnelUrl(url: string): boolean {
+  return /ngrok|trycloudflare|localtunnel|loca\.lt/i.test(url);
+}
+
+/** 接口返回网页而不是 JSON 时给出能直接照做的说明，别让用户盯着 600 字 HTML 猜。 */
+function friendlyInterfaceError(status: number, url: string): string {
+  if (/ngrok/i.test(url)) {
+    return `生图接口返回的是 ngrok 的网页（HTTP ${status}）：这条 ngrok 隧道现在没连到你的服务——要么隧道已经断开，要么免费版重启后地址变了。请重新启动 ngrok，把新的 https 地址填回 Base URL，再点「测试生图」。`;
+  }
+  if (isTunnelUrl(url)) {
+    return `生图接口返回的是隧道服务商的网页（HTTP ${status}）：隧道可能已断开或地址已更换。请检查隧道进程，并把新地址填回 Base URL。`;
+  }
+  return `生图接口返回的是网页而不是 JSON（HTTP ${status}）：地址可能填错，或指到了登录页/提示页。请确认 Base URL 是接口根路径（通常以 /v1 结尾）。`;
+}
+
 function cleanBase64(value: string): { b64: string; mimeType?: string } {
   const match = /^data:([^;]+);base64,([\s\S]+)$/.exec(value.trim());
   if (match) return { mimeType: match[1], b64: match[2] };
@@ -252,12 +270,25 @@ async function fetchImageUrlAsBase64(url: string, signal?: AbortSignal): Promise
   return { b64: cleaned.b64, mimeType: cleaned.mimeType || blob.type || "image/png" };
 }
 
-async function parseImageGenerationResponse(res: Response, signal?: AbortSignal): Promise<ImageGenerationApiResponse> {
+async function parseImageGenerationResponse(
+  res: Response,
+  signal?: AbortSignal,
+  requestUrl = "",
+): Promise<ImageGenerationApiResponse> {
   throwIfAborted(signal);
   const contentType = (res.headers.get("content-type") || "").toLowerCase();
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    if (HTML_ERROR_RE.test(text) || contentType.includes("text/html")) {
+      throw new Error(friendlyInterfaceError(res.status, requestUrl));
+    }
     throw new Error(`生图 API 错误 ${res.status}: ${text.slice(0, 600)}`);
+  }
+
+  if (contentType.includes("text/html")) {
+    const text = await res.text().catch(() => "");
+    if (HTML_ERROR_RE.test(text)) throw new Error(friendlyInterfaceError(res.status, requestUrl));
+    throw new Error(`生图 API 返回的是网页而不是 JSON（${contentType || "unknown"}），请检查 Base URL 是否指向接口根路径。`);
   }
 
   if (contentType.startsWith("image/")) {
@@ -298,12 +329,13 @@ export function filterLikelyImageModels(models: string[]): string[] {
 export async function fetchImageGenerationModels(settings: Pick<ImageGenerationSettings, "apiKey" | "baseUrl" | "requestMode">): Promise<string[]> {
   if (settings.requestMode === "direct") {
     try {
-      const res = await fetch(buildModelsUrl(settings.baseUrl), {
-        method: "GET",
-        headers: { Authorization: `Bearer ${settings.apiKey}` },
-      });
+      const modelsUrl = buildModelsUrl(settings.baseUrl);
+      const headers: Record<string, string> = { Authorization: `Bearer ${settings.apiKey}` };
+      if (/ngrok/i.test(modelsUrl)) headers["ngrok-skip-browser-warning"] = "true";
+      const res = await fetch(modelsUrl, { method: "GET", headers });
       const text = await res.text();
-      if (!res.ok) {
+      if (!res.ok || HTML_ERROR_RE.test(text)) {
+        if (HTML_ERROR_RE.test(text)) throw new Error(friendlyInterfaceError(res.status, modelsUrl));
         throw new Error(`模型列表 API 错误 ${res.status}: ${text.slice(0, 400)}`);
       }
       return extractModels(JSON.parse(text));
@@ -349,6 +381,8 @@ async function generateImageDirect(params: {
   const hasReference = Boolean(referenceImageDataUrl);
   const url = buildImageUrl(proxyBaseUrl || settings.baseUrl, hasReference ? "edits" : "generations");
   const headers: Record<string, string> = { Authorization: `Bearer ${settings.apiKey}` };
+  // ngrok 免费隧道默认给浏览器塞一张警告页（HTML），API 客户端要显式跳过才有 JSON。
+  if (/ngrok/i.test(url)) headers["ngrok-skip-browser-warning"] = "true";
   if (proxyBaseUrl) headers["x-upstream-base-url"] = normalizeBaseUrl(settings.baseUrl);
   let body: BodyInit;
 
@@ -379,7 +413,7 @@ async function generateImageDirect(params: {
   if (signal) signal.addEventListener("abort", onOuterAbort, { once: true });
   const totalTimer = setTimeout(() => controller.abort(), 360_000);
   try {
-    return await parseImageGenerationResponse(await fetch(url, { method: "POST", headers, body, signal: controller.signal }), signal);
+    return await parseImageGenerationResponse(await fetch(url, { method: "POST", headers, body, signal: controller.signal }), signal, url);
   } catch (error) {
     if (controller.signal.aborted && !signal?.aborted) {
       throw new Error(proxyBaseUrl ? "生图代理超时（360 秒未返回）" : "生图请求超时（360 秒未返回）");
