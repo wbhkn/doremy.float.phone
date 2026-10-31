@@ -4,7 +4,7 @@
 // 不绑账号也能用：角色看到的是公开热门；绑了就是「用我的号刷」，推荐流是个性化的。
 
 import { useState } from "react";
-import { Loader2, KeyRound, Tv } from "lucide-react";
+import { Loader2, KeyRound, Tv, Clapperboard } from "lucide-react";
 import { Input, Toggle } from "@/components/ui/form";
 import {
     clearBiliCookie,
@@ -22,12 +22,49 @@ import {
     loadInternalCapabilities,
     saveInternalCapabilities,
 } from "@/lib/internal-capability-storage";
+import {
+    DEFAULT_VIDEO_BRIDGE_URL,
+    loadVideoBridgeUrl,
+    saveVideoBridgeUrl,
+} from "@/lib/video-watch-tool";
 
 export function BilibiliSettings({ onNotice }: { onNotice?: (msg: string) => void }) {
     const [cookie, setCookie] = useState(() => loadBiliCookie());
     const [saved, setSaved] = useState(() => loadBiliCookie());
     const [checking, setChecking] = useState(false);
     const [status, setStatus] = useState<BiliLoginState | null>(null);
+    // 「看视频」桥：跑在{{user}}自己电脑上（D:\video-bridge），手机上只需要知道地址。
+    const [videoBridge, setVideoBridge] = useState(() => loadVideoBridgeUrl());
+    const [videoTesting, setVideoTesting] = useState(false);
+    const [videoStatus, setVideoStatus] = useState<string>("");
+
+    const handleSaveVideoBridge = async () => {
+        const url = saveVideoBridgeUrl(videoBridge) || videoBridge.trim();
+        setVideoBridge(url);
+        if (!url) {
+            setVideoStatus("已清空：角色将无法看视频");
+            return;
+        }
+        setVideoTesting(true);
+        setVideoStatus("正在问电脑…");
+        try {
+            const res = await fetch(`${url.replace(/\/+$/, "")}/health`, { signal: AbortSignal.timeout(8000) });
+            const data = (await res.json()) as { ok?: boolean; ffmpeg?: boolean; clip?: string };
+            if (data?.ok) {
+                setVideoStatus(
+                    data.ffmpeg === false
+                        ? "电脑在线，但缺 ffmpeg（桥里跑不起来）"
+                        : `✓ 电脑在线${data.clip ? ` · ${data.clip}` : ""}`,
+                );
+            } else {
+                setVideoStatus("✗ 电脑返回了看不懂的东西");
+            }
+        } catch {
+            setVideoStatus(`✗ 连不上（电脑要开着、和手机同一个 WiFi；默认 ${DEFAULT_VIDEO_BRIDGE_URL}）`);
+        } finally {
+            setVideoTesting(false);
+        }
+    };
     const [browseOn, setBrowseOn] = useState(() => {
         const capability = getInternalCapability(BILIBILI_BROWSE_CAPABILITY_ID);
         return Boolean(capability && capability.enabled && capability.mode !== "off");
@@ -159,6 +196,38 @@ export function BilibiliSettings({ onNotice }: { onNotice?: (msg: string) => voi
                 <span className="menu-desc !mt-0">
                     只填 SESSDATA 也能用。这串东西只存在这台手机上，不会上传到别处；在 B 站「退出登录」它就立刻失效。
                 </span>
+            </div>
+
+            <div className="ui-group-card !items-stretch">
+                <div className="flex items-start gap-3">
+                    <div className="ui-icon-circle shrink-0"><Clapperboard size={20} /></div>
+                    <div className="flex-1 flex flex-col gap-1 min-w-0">
+                        <span className="menu-label font-medium">看视频服务（可选）</span>
+                        <span className="menu-desc !mt-0">
+                            让角色能真的看见画面：把视频压成一张分镜图再发进聊天。
+                            这一步要下载和抽帧，跑在你自己的电脑上（D:\video-bridge），手机只连地址。
+                        </span>
+                    </div>
+                </div>
+                <div className="flex flex-col gap-3 mt-4">
+                    <Input
+                        value={videoBridge}
+                        placeholder="http://192.168.10.4:9881"
+                        onChange={(e) => setVideoBridge(e.target.value)}
+                    />
+                    <span className="menu-desc !mt-0">
+                        电脑上运行 `python D:\video-bridge\server.py`，手机和电脑连同一个 WiFi；换电脑或 IP 变了就在这里改。
+                    </span>
+                    <button
+                        type="button"
+                        className="ui-btn ui-btn-primary w-full justify-center"
+                        disabled={videoTesting}
+                        onClick={() => void handleSaveVideoBridge()}
+                    >
+                        {videoTesting ? <><Loader2 size={16} className="animate-spin" /> 正在问电脑…</> : "保存并测试连接"}
+                    </button>
+                    {videoStatus && <span className="menu-desc !mt-0 text-center">{videoStatus}</span>}
+                </div>
             </div>
         </div>
     );

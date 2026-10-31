@@ -24,6 +24,7 @@ import {
 import { executeCustomAppToolCall } from "./custom-app-tool-runtime";
 import { characterWorkspace, agentComputerRequest, isAgentComputerConfigured } from "./agent-computer";
 import { BILIBILI_BROWSE_CAPABILITY_ID, biliApiCall, biliUserNotice, formatBiliResult, shareBilibiliVideoToChat } from "./bilibili-tool";
+import { VIDEO_WATCH_CAPABILITY_ID, formatVideoWatchResult, watchVideo } from "./video-watch-tool";
 import { AGENT_COMPUTER_CAPABILITY_ID, CHECK_IN_REQUEST_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, DEVICE_ACTION_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, PERCEPTION_READ_CAPABILITY_ID, PHONE_WIDGET_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, SYSTEM_CALENDAR_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
 import {
     checkQueryCooldown,
@@ -815,6 +816,7 @@ async function executeInternalTool(call: ToolCall, context?: ToolExecutionContex
     if (call.name === "发送文件") return executeSendFileTool(call);
     if (call.name === "角色电脑") return executeAgentComputerTool(call, context);
     if (call.name === "刷B站") return executeBilibiliTool(call, context);
+    if (call.name === "看视频") return executeVideoWatchTool(call, context);
     // 内置工具必须排在用户自定义的现实桥动作**之前**：
     // 用户完全可能把快捷动作也命名成「查看手机状态」，若让现实桥先匹配，
     // 内置工具就永远调不到（被同名的用户动作影子覆盖），而且表现是
@@ -2684,6 +2686,50 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
     };
 }
 
+// ── 看视频（把视频压成一张分镜图，让角色真的看见画面）──────
+
+async function executeVideoWatchTool(
+    call: ToolCall,
+    context?: ToolExecutionContext,
+): Promise<ToolResult> {
+    const failed = (error: string, userNotice?: string): ToolResult => ({
+        name: call.name,
+        success: false,
+        error,
+        continueConversation: false,
+        persistToHistory: false,
+        userNotice,
+    });
+
+    const capability = getInternalCapability(VIDEO_WATCH_CAPABILITY_ID);
+    if (!capability || !capability.enabled || capability.mode === "off") {
+        return failed("看视频能力未启用（设置 → 工具箱 → 内置能力）");
+    }
+    if (!isSupportedChatToolContext(context)) return failed("当前场景暂不支持看视频");
+
+    const args = (call.args || {}) as Record<string, unknown>;
+    const url = String(args.url ?? "").trim();
+    if (!url) return failed("得给一个视频地址（B 站链接或 BV 号）");
+
+    const result = await watchVideo({
+        url,
+        cells: Number(args.cells) || undefined,
+    });
+
+    if (!result.ok) return failed(result.message, "🎬 这个视频没能看成");
+
+    return {
+        name: call.name,
+        success: true,
+        data: formatVideoWatchResult(result),
+        continueConversation: true,
+        persistToHistory: false,
+        userNotice: `🎬 看了《${result.title.slice(0, 24)}》的分镜`,
+        // 分镜图随本轮请求直接送给模型（引擎会转成 image 消息），
+        // 同时落一条聊天消息让{{user}}那边也看得见。
+        mediaAttachments: [{ type: "image", url: result.imageRef, title: `视频分镜 · ${result.title.slice(0, 18)}` }],
+    };
+}
 // ── 角色电脑（角色自己的云端小电脑）───────────────
 
 function agentComputerMimeFor(path: string): string {

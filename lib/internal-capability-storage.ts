@@ -1,6 +1,7 @@
 import type { InternalCapabilityConfig } from "./settings-types";
 import { isAgentComputerConfigured, isContainerComputer } from "./agent-computer";
 import { BILIBILI_BROWSE_CAPABILITY_ID, BILIBILI_PARAMETER_SCHEMA, BILIBILI_USAGE_GUIDE } from "./bilibili-tool";
+import { VIDEO_WATCH_CAPABILITY_ID, VIDEO_WATCH_PARAMETER_SCHEMA, VIDEO_WATCH_USAGE_GUIDE } from "./video-watch-tool";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { loadBridgeDataItems, loadBridgeShortcutActions, parseBridgeActionParameterSchema } from "./reality-bridge/storage";
 
@@ -36,6 +37,7 @@ export const RESERVED_INTERNAL_TOOL_NAMES: string[] = [
     "在桌面留句话",
     "请求看屏幕",
     "刷B站",
+    "看视频",
     "查看手机状态",
     "操作手机设备",
     "查看系统日程",
