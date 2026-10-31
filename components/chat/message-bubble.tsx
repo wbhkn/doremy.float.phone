@@ -2337,8 +2337,10 @@ function BilibiliShareBubble({ msg }: { msg: ChatMessage }) {
     const duration = data?.biliDuration || "";
     const view = Number(data?.biliView) || 0;
     const pending = Boolean(data?.biliPending) && !title;
+    const [copied, setCopied] = useState(false);
     // 短链没解析出 BV 时，用原始链接兜底，卡片照样能点开
     const url = bvid ? `https://www.bilibili.com/video/${bvid}` : data?.biliLink || "";
+    const linkLabel = url ? url.replace(/^https?:\/\//, "") : "";
 
     const openVideo = () => {
         if (!url) return;
@@ -2367,6 +2369,36 @@ function BilibiliShareBubble({ msg }: { msg: ChatMessage }) {
                     {up ? <span className="chat-bili-share-up">{up}</span> : null}
                     {view ? <span className="chat-bili-share-view">{formatBiliView(view)}播放</span> : null}
                 </div>
+                {url ? (
+                    <div className="chat-bili-share-linkline">
+                        <a
+                            className="chat-bili-share-link"
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            {linkLabel}
+                        </a>
+                        <button
+                            type="button"
+                            className="chat-bili-share-copy"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                if (!url) return;
+                                void navigator.clipboard
+                                    ?.writeText(url)
+                                    .then(() => {
+                                        setCopied(true);
+                                        window.setTimeout(() => setCopied(false), 1600);
+                                    })
+                                    .catch(() => {});
+                            }}
+                        >
+                            {copied ? "已复制" : "复制"}
+                        </button>
+                    </div>
+                ) : null}
             </div>
         </div>
     );

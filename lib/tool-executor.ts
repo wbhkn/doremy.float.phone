@@ -24,6 +24,7 @@ import {
 import { executeCustomAppToolCall } from "./custom-app-tool-runtime";
 import { characterWorkspace, agentComputerRequest, isAgentComputerConfigured } from "./agent-computer";
 import { BILIBILI_BROWSE_CAPABILITY_ID, biliApiCall, biliUserNotice, formatBiliResult, shareBilibiliVideoToChat } from "./bilibili-tool";
+import { resolveBiliBvid } from "./bilibili-card";
 import { VIDEO_WATCH_CAPABILITY_ID, formatVideoWatchResult, watchVideo } from "./video-watch-tool";
 import { AGENT_COMPUTER_CAPABILITY_ID, CHECK_IN_REQUEST_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, DEVICE_ACTION_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, PERCEPTION_READ_CAPABILITY_ID, PHONE_WIDGET_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, SYSTEM_CALENDAR_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
 import {
@@ -2624,7 +2625,21 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
     const args = (call.args || {}) as Record<string, unknown>;
     const action = String(args.action ?? "").trim().toLowerCase();
     const params: Record<string, string | number> = {};
-    const bvid = String(args.bvid ?? "").trim();
+    // 模型经常把视频号写成 url / link / id：这里统一认下来，短链走服务端解析。
+    let bvid = "";
+    for (const key of ["bvid", "bv", "id", "video", "url", "link", "share_url"]) {
+        const text = String(args[key] ?? "").trim();
+        if (!text) continue;
+        const direct = /BV[0-9A-Za-z]{10}/.exec(text);
+        if (direct) {
+            bvid = direct[0];
+            break;
+        }
+        if (!bvid && /^https?:\/\//i.test(text)) bvid = text;
+    }
+    if (bvid && !/^BV[0-9A-Za-z]{10}$/.test(bvid)) {
+        bvid = await resolveBiliBvid(bvid);
+    }
 
     if (action === "feed") {
         if (Number(args.ps)) params.ps = Math.min(Math.max(Number(args.ps), 1), 20);
@@ -2636,18 +2651,38 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
         if (Number(args.ps)) params.ps = Math.min(Math.max(Number(args.ps), 1), 20);
     } else if (action === "search") {
         const keyword = String(args.keyword ?? "").trim();
-        if (!keyword) return failed("搜视频得给一个关键词（keyword）");
+        if (!keyword) {
+            return failed(
+                '搜视频要给关键词：{"action":"search","keyword":"关键词"}',
+                "📺 没搜成，不知道搜什么",
+            );
+        }
         params.keyword = keyword;
         if (Number(args.page)) params.page = Math.max(Number(args.page), 1);
     } else if (action === "video" || action === "comments" || action === "related" || action === "online") {
-        if (!bvid) return failed("需要视频号 bvid（BV 开头）");
+        if (!bvid) {
+            return failed(
+                '要看/翻一条具体视频，得带视频号或链接：{"action":"video","bvid":"BV1xx411x7xx"}，也可以用 "url"',
+                "📺 没找到是哪条视频",
+            );
+        }
         params.bvid = bvid;
     } else if (action === "user") {
         const mid = String(args.mid ?? "").trim();
-        if (!mid) return failed("看 UP 主主页需要 mid（视频详情里的 up_mid）");
+        if (!mid) {
+            return failed(
+                '看 UP 主主页要 mid（视频详情里的 up_mid）：{"action":"user","mid":"12345"}',
+                "📺 没找到是哪位 UP 主",
+            );
+        }
         params.mid = mid;
     } else if (action === "share") {
-        if (!bvid) return failed("要分享得给视频号 bvid（BV 开头）");
+        if (!bvid) {
+            return failed(
+                '分享要带视频号或链接：{"action":"share","bvid":"BV1xx411x7xx"}，也可以 {"action":"share","url":"https://b23.tv/xxxx"}',
+                "📺 没找到要分享的那条视频",
+            );
+        }
         const shared = await shareBilibiliVideoToChat({ sessionId: context?.sessionId, bvid });
         if (!shared.ok) {
             return failed(shared.message || "分享失败", "📺 这条视频没分享出去");

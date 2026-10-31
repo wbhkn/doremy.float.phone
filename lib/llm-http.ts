@@ -253,6 +253,45 @@ function degradeAllInlineData(body: unknown): boolean {
     return changed;
 }
 
+/**
+ * 另一种请求体：OpenAI / Anthropic 的 messages 数组。
+ *
+ * 中转收到 image_url 后自己会把它转成 Gemini 的 inlineData，于是同样会 400
+ * （contents[N].parts[M].inlineData is not supported in text history）。
+ * 这里把「最后一条 user 消息以外」的图片都换成文本占位，再重试一次。
+ */
+function degradeHistoryImagesInMessages(body: unknown): boolean {
+    if (!isRecord(body)) return false;
+    const messages = body.messages;
+    if (!Array.isArray(messages)) return false;
+
+    let lastUserIndex = -1;
+    messages.forEach((message, index) => {
+        if (isRecord(message) && message.role === "user") lastUserIndex = index;
+    });
+
+    let changed = false;
+    messages.forEach((message, index) => {
+        if (!isRecord(message) || index >= lastUserIndex) return;
+        if (!Array.isArray(message.content)) return;
+        const content = message.content as unknown[];
+        for (let i = 0; i < content.length; i += 1) {
+            const part = content[i];
+            if (!isRecord(part)) continue;
+            const isImage =
+                isRecord(part.image_url) ||
+                isRecord(part.source) ||
+                part.type === "image" ||
+                part.type === "image_url";
+            if (isImage) {
+                content[i] = { type: "text", text: "[图片]" };
+                changed = true;
+            }
+        }
+    });
+    return changed;
+}
+
 function responseMentionsInlineDataRejection(status: number, errorText: string): boolean {
     if (status !== 400 && status !== 422) return false;
     return /inline_?data/i.test(errorText) && /(not supported|invalid|unsupported|not allowed)/i.test(errorText);
@@ -305,7 +344,9 @@ export async function fetchLlmPayload(
     // 中转/新版 Gemini 会拒收历史里的 inlineData：把所有内联图降级成 [图片] 再试一次。
     if (responseMentionsInlineDataRejection(response.status, errorText)) {
         const next = body ?? (isRecord(payload.body) ? { ...(payload.body as Record<string, unknown>) } : null);
-        if (next && degradeAllInlineData(next)) {
+        // 两种请求体都要兜：Gemini 原生是 contents[].parts[].inlineData；
+        // 经中转（OpenAI 兼容）时 body 是 messages[]，要按历史图片降级。
+        if (next && (degradeAllInlineData(next) || degradeHistoryImagesInMessages(next))) {
             const retried = await sendOnce(payload, JSON.stringify(next), options.signal);
             if (retried.ok) return retried;
             try { errorText = await retried.clone().text(); } catch { errorText = ""; }

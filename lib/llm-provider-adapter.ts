@@ -441,6 +441,45 @@ function openAIContent(content: string | LLMContentPart[]): string | LLMContentP
     return content;
 }
 
+/**
+ * 历史消息里的图片降级成「[图片]」。
+ *
+ * Gemini 只允许**当前这一轮**带图，历史里塞 inlineData 会直接 400：
+ * `contents[25].parts[1].inlineData is not supported in text history`。
+ * 中转（OpenAI 兼容接口）自己把 image_url 转成 inlineData 时同样会踩到，
+ * 所以这里在发请求前就把「除最后一条 user 消息以外」的图都换成文本。
+ * 顺带也省 token——历史图对模型理解当下的对话通常没帮助。
+ */
+function degradeHistoryImages(content: string | LLMContentPart[]): string | LLMContentPart[] {
+    if (!Array.isArray(content)) return content;
+    let touched = false;
+    const next = content.map<LLMContentPart>((part) => {
+        if (part.type === "text") return part;
+        touched = true;
+        return { type: "text", text: "[图片]" };
+    });
+    return touched ? next : content;
+}
+
+function withHistoryImagesDegraded(messages: LlmRequestMessage[]): LlmRequestMessage[] {
+    let lastUserIndex = -1;
+    messages.forEach((message, index) => {
+        if (message.role === "user") lastUserIndex = index;
+    });
+    if (lastUserIndex <= 0) return messages;
+    let touched = false;
+    const next = messages.map((message, index) => {
+        // 最后一条 user 消息保留图片（这一轮真的要给它看），历史一律降级。
+        if (index === lastUserIndex) return message;
+        if (!Array.isArray(message.content)) return message;
+        const content = degradeHistoryImages(message.content);
+        if (content === message.content) return message;
+        touched = true;
+        return { ...message, content } as LlmRequestMessage;
+    });
+    return touched ? next : messages;
+}
+
 function parseDataUrl(url: string): { mimeType: string; data: string } | null {
     const match = url.match(/^data:([^;,]+);base64,(.+)$/);
     if (!match) return null;
@@ -494,9 +533,12 @@ function buildOpenAICompatibleRequest(
     options: ProviderRequestOptions,
 ): LlmRequestPayload {
     const sanitizeToolSchemaEnums = shouldStringifyToolSchemaEnums(config, baseUrl);
+    // 历史里的图片先降级：中转（OpenAI 兼容）会把 image_url 再转成 Gemini 的
+    // inlineData，历史带图就会被判 400（inlineData is not supported in text history）。
+    const preparedMessages = withHistoryImagesDegraded(messages);
     const body: Record<string, unknown> = {
         model: config.defaultModel,
-        messages: messages.map((message) => {
+        messages: preparedMessages.map((message) => {
             if (message.role === "tool") {
                 return {
                     role: "tool",
@@ -574,7 +616,7 @@ function buildAnthropicRequest(
     options: ProviderRequestOptions,
 ): LlmRequestPayload {
     const { systemText: system, rest } = splitLeadingSystemMessages(messages);
-    const bodyMessages = compactAnthropicMessages(rest);
+    const bodyMessages = compactAnthropicMessages(withHistoryImagesDegraded(rest));
     const enabled = resolveEnabledGenerationParameters(preset);
     const body: Record<string, unknown> = {
         model: config.defaultModel,

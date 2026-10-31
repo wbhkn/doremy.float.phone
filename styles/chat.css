@@ -2489,6 +2489,39 @@
   font-weight: 400;
 }
 
+/* 卡片底部那行真实链接：能看见、能点、能复制（用户反馈"没看到链接"） */
+.chat-bili-share-linkline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.chat-bili-share-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #2f7fe0;
+  font-size: calc(9.5px*var(--app-text-scale,1));
+  text-decoration: none;
+}
+
+.chat-bili-share-copy {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(47, 127, 224, 0.35);
+  background: rgba(47, 127, 224, 0.08);
+  color: #2f7fe0;
+  font-size: calc(9px*var(--app-text-scale,1));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
 .chat-xhs-share-head {
   display: flex;
   align-items: center;
