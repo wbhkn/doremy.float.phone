@@ -2392,6 +2392,15 @@
   transform: scale(0.985);
 }
 
+/* 角色没走「分享」动作、只在正文里打了 BV 号时，补在气泡下面的卡片 */
+.chat-bili-inline-card {
+  margin-top: 6px;
+  display: block;
+  align-self: flex-start;
+  text-decoration: none;
+  color: inherit;
+}
+
 .chat-bili-share-cover {
   position: relative;
   width: 100%;

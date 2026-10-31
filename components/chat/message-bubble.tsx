@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { InlineBiliCard } from "@/components/chat/inline-bili-card";
 import { findCustomStickerByName, resolveCustomStickerUrl } from "@/lib/custom-sticker-storage";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -137,6 +138,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
             return (
                 <>
                     {textBubble}
+                    <InlineBiliCard text={displayContent ?? msg.content} />
                     <ChatPluginSlot name="message.footer" slotProps={{ sessionId: msg.sessionId, message: msg }} className="chat-plugin-message-footer" />
                 </>
             );
