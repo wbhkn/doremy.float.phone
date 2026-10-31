@@ -567,21 +567,6 @@ function buildOpenAICompatibleRequest(
                 }
                 return assistantMessage;
             }
-            if (message.role === "assistant") {
-                const assistantMessage: Record<string, unknown> = {
-                    role: "assistant",
-                    content: openAIContent(message.content),
-                };
-                // DeepSeek 的 thinking 模式要求把上一轮 assistant 的 reasoning_content 原样回传，
-                // 否则多轮对话（尤其工具调用轮）会报 “reasoning_content … must be passed back”。
-                if (message.reasoning && shouldEchoReasoningContent(config)) {
-                    assistantMessage.reasoning_content = message.reasoning;
-                }
-                if (config.provider === "OpenRouter" && message.openRouterReasoningDetails?.length) {
-                    assistantMessage.reasoning_details = message.openRouterReasoningDetails;
-                }
-                return assistantMessage;
-            }
             return { role: message.role, content: openAIContent(message.content) };
         }),
         ...buildSamplingBody(preset),
@@ -617,14 +602,10 @@ function shouldEchoReasoningContent(config: ApiConfig): boolean {
     const provider = config.provider.toLowerCase();
     const model = config.defaultModel.toLowerCase();
     const baseUrl = (config.baseUrl || "").toLowerCase();
-    // DeepSeek 的 thinking 模式（deepseek-reasoner / v3.2 thinking 等）要求回传 reasoning_content。
-    // 经中转站调用时 baseUrl / provider 都不一定带 “deepseek”，所以按模型名也认一遍。
     return provider === "deepseek"
         || baseUrl.includes("deepseek")
-        || model.includes("deepseek")
-        || model.includes("reasoner")
-        || model.endsWith("-r1")
-        || model.includes("-r1-");
+        || model.includes("deepseek-reasoner")
+        || model.includes("deepseek-r1");
 }
 
 function buildAnthropicRequest(
