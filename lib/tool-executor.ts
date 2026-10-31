@@ -2639,7 +2639,24 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
     if (!isSupportedChatToolContext(context)) return failed("当前场景暂不支持刷B站");
 
     const args = (call.args || {}) as Record<string, unknown>;
-    const action = String(args.action ?? "").trim().toLowerCase();
+    const rawAction = String(args.action ?? "").trim().toLowerCase();
+    // 模型偶尔会把动作写成中文（分享 / 分享视频 / 搜索…），这里收一下。
+    const action =
+        rawAction === "分享" || rawAction === "分享视频" || rawAction === "转发"
+            ? "share"
+            : rawAction === "搜索" || rawAction === "搜"
+              ? "search"
+              : rawAction === "热门"
+                ? "popular"
+                : rawAction === "排行榜"
+                  ? "ranking"
+                  : rawAction === "推荐" || rawAction === "推荐流"
+                    ? "feed"
+                    : rawAction === "详情" || rawAction === "视频详情"
+                      ? "video"
+                      : rawAction === "评论"
+                        ? "comments"
+                        : rawAction;
     const params: Record<string, string | number> = {};
     // 模型经常把视频号写成 url / link / id：这里统一认下来，短链走服务端解析。
     let bvid = "";
@@ -2719,8 +2736,19 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
         params.mid = mid;
     } else if (action === "share") {
         if (!bvid) {
+            // 弱一点的模型常常只记得标题、忘了视频号：按标题兜一次搜索再分享。
+            const hint = String(args.title ?? args.keyword ?? args.name ?? args.desc ?? "").trim();
+            if (hint.length >= 2) {
+                const found = await biliApiCall("search", { keyword: hint.slice(0, 40), ps: 5 });
+                const first = Array.isArray(found.items)
+                    ? (found.items[0] as { bvid?: string } | undefined)
+                    : undefined;
+                if (found.ok && first?.bvid) bvid = String(first.bvid);
+            }
+        }
+        if (!bvid) {
             return failed(
-                '分享要带视频号或链接：{"action":"share","bvid":"BV1xx411x7xx"}，也可以 {"action":"share","url":"https://b23.tv/xxxx"}',
+                '分享要带视频号/链接/标题：{"action":"share","bvid":"BV1xx411x7xx"}，或 {"action":"share","url":"https://b23.tv/xxxx"}，或 {"action":"share","title":"视频标题"}',
                 "📺 没找到要分享的那条视频",
             );
         }

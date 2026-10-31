@@ -27,6 +27,10 @@ export const BILIBILI_PARAMETER_SCHEMA = JSON.stringify({
             type: "string",
             description: "视频号，形如 BV1xx411c7mD。video / comments / related / online / share 需要（传完整链接或 b23.tv 短链也认）",
         },
+        title: {
+            type: "string",
+            description: "视频标题（可选）：记不住 bvid 时，share 可以只传标题，会按标题去搜一条最像的",
+        },
         url: {
             type: "string",
             description: "视频链接（可选，替代 bvid）：https://www.bilibili.com/video/BV... 或 https://b23.tv/xxxx",
@@ -65,7 +69,7 @@ export const BILIBILI_USAGE_GUIDE = [
     "怎么用才像真的在刷：不要一次把所有标题念给{{user}}听；挑你真感兴趣的 1-2 条，看完说说你的感受、吐槽、联想到的事，再自然地说你在 B 站看到什么。",
     "如果这台手机配了{{user}}自己的 B 站账号，feed 就是 TA 账号的推荐流——就像你拿 TA 的手机随手刷。看到和 TA 有关的内容可以提一句，但别把 TA 的收藏/历史当谈资逐条汇报。",
     "参数要点：bvid 是视频号（BV 开头）；拿不到 bvid 时可以直接把视频链接放进 url（b23.tv 短链也行）；user 要 mid（数字 id，video 结果里的 up_mid）；排行榜可带 rid 选分区；一次 ps 不要超过 20。",
-    "【分享】真看到有意思的视频、想让{{user}}也看一眼时，用 action=share + bvid（或 url）——聊天里会直接出现一张带真实封面、标题和可复制链接的卡片。分享前先看一眼它是什么（别把没看过的视频丢过去），一次对话里最多分享一两条。",
+    "【分享】真看到有意思的视频、想让{{user}}也看一眼时，用 action=share + bvid（或 url；实在记不住视频号就传 title）——聊天里会直接出现一张带真实封面、标题和可复制链接的卡片。分享前先看一眼它是什么（别把没看过的视频丢过去），一次对话里最多分享一两条。分享必须真的调用这个动作：不要在正文里写「[分享视频]」这类占位文字，那样{{user}}只会看到一行字，没有卡片。",
     "【边界】遇到「风控」类报错说明 B 站这次按频率拦了（隔一两分钟再试，别连着重试）；一次对话里别刷太多轮，看几条就够了。",
 ].join("\n");
 
