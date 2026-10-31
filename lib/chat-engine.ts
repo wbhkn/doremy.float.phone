@@ -421,6 +421,18 @@ function mergeAppTags(base: string[] | undefined, extra: string[] | undefined, f
  * 模型有时不真的调用「分享」动作，而是在正文里写一行「[分享视频]」占位。
  * 那种占位没有任何信息量，留给用户只会变成一条死文本，这里直接抹掉。
  */
+/** 把 API 失败翻译成用户能看懂的话（尤其 401「无效的令牌」）。 */
+function explainApiFailure(prefix: string, status: number, errorText: string): string {
+    let hint = "";
+    if (status === 401) {
+        hint = "（API Key 被判为无效：可能已过期/被禁用/额度用完，或这个 Key 和「接口地址」不是同一家的）";
+    } else if (status === 402 || status === 403) {
+        hint = "（没有权限或额度不足：确认这个 Key 开通了当前模型）";
+    } else if (status === 429) {
+        hint = "（请求太频繁或额度耗尽，等一会儿再试）";
+    }
+    return `${prefix} ${status}: ${errorText}${hint}`;
+}
 export function stripSharePlaceholders(text: string): string {
     if (!text) return text;
     const cleaned = text.replace(/[\[【（(]\s*(?:分享视频|分享的视频|视频卡片|分享卡片)\s*[\]】）)]/g, "");
@@ -854,7 +866,7 @@ export async function sendLLMStreamRequest(
         const response = await fetchLlmPayload(request, { signal: llmAbort.signal });
         if (!response.ok) {
             const errorText = await response.text();
-            throw new ChatEngineError(`API Stream Error ${response.status}: ${errorText}`);
+            throw new ChatEngineError(explainApiFailure("API Stream Error", response.status, errorText));
         }
         // 流式路径收集思维链原文：readSseStream 只通过 onReasoningDelta 回调透传，
         // 不额外包一层的话日志里就只有清洗后的回复正文，思维链被吞。
@@ -977,7 +989,7 @@ export async function sendLLMRequest(
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new ChatEngineError(`API Error ${response.status}: ${errorText}`);
+            throw new ChatEngineError(explainApiFailure("API Error", response.status, errorText));
         }
 
         const data = await response.json();
@@ -1156,7 +1168,7 @@ export async function sendLLMToolStreamRequest(
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new ChatEngineError(`API Tool Stream Error ${response.status}: ${errorText}`);
+            throw new ChatEngineError(explainApiFailure("API Tool Stream Error", response.status, errorText));
         }
         if (!response.body) throw new ChatEngineError("原生动作流式响应没有 body。");
 
@@ -1304,7 +1316,7 @@ export async function sendLLMToolRequest(
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new ChatEngineError(`API Tool Error ${response.status}: ${errorText}`);
+            throw new ChatEngineError(explainApiFailure("API Tool Error", response.status, errorText));
         }
 
         const data = await response.json();

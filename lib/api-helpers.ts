@@ -41,6 +41,19 @@ export function buildChatCompletionsUrl(baseUrl: string): string {
 }
 
 /**
+ * 用户常常把 Key 连引号、连「Bearer 」一起粘进来，或者末尾带空格/换行。
+ * 这些都会让中转站判成「无效的令牌」，这里统一洗干净。
+ */
+export function normalizeApiKey(raw: string | null | undefined): string {
+    let key = String(raw ?? "").trim();
+    if (!key) return "";
+    key = key.replace(/^["'`]+|["'`]+$/g, "").trim();
+    key = key.replace(/^Bearer\s+/i, "").trim();
+    key = key.replace(/^["'`]+|["'`]+$/g, "").trim();
+    return key;
+}
+
+/**
  * Build request headers for an API config.
  * Handles provider-specific headers (OpenRouter, Anthropic, etc.)
  * and custom proxy/relay sites that use standard Bearer auth.
@@ -49,14 +62,15 @@ export function buildRequestHeaders(config: ApiConfig, baseUrl: string): Record<
     const headers: Record<string, string> = {
         "Content-Type": "application/json",
     };
+    const apiKey = normalizeApiKey(config.apiKey);
 
     if (config.provider === "Anthropic" && !config.baseUrl) {
         // Native Anthropic API uses x-api-key
-        headers["x-api-key"] = config.apiKey;
+        headers["x-api-key"] = apiKey;
         headers["anthropic-version"] = "2023-06-01";
     } else {
         // All others (including Anthropic via proxy/relay) use Bearer token
-        headers["Authorization"] = `Bearer ${config.apiKey}`;
+        headers["Authorization"] = `Bearer ${apiKey}`;
     }
 
     // OpenRouter requires referer headers
