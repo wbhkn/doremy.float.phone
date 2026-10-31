@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
+
 import { getCurrentAccount } from "@/lib/server/account-auth";
 import { broadcastShellNotify, getOrCreateVapidConfig } from "@/lib/server/push-service";
 import { encodeSupabaseFilter, getSupabaseServerConfig, supabaseRestFetch } from "@/lib/server/supabase-rest";
@@ -51,7 +53,7 @@ export async function GET(request: Request) {
   steps.push({ key: "site", label: "站点 Supabase 配置", status: "ok", detail: `已配置：${supabase.url}` });
 
   // NEXT_PUBLIC_SELF_HOSTED_MODE 是构建期注入，服务端读到的就是打包时的值。
-  const selfHosted = process.env.NEXT_PUBLIC_SELF_HOSTED_MODE === "true";
+  const selfHosted = isSelfHostedModeEnabled();
   steps.push({
     key: "mode",
     label: "单机模式开关",

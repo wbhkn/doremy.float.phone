@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
+
 import { getCurrentAccount } from "@/lib/server/account-auth";
 import { encodeSupabaseFilter, formatSupabaseRestError, getSupabaseServerConfig, supabaseRestFetch } from "@/lib/server/supabase-rest";
 
@@ -15,7 +17,7 @@ type OutboxRow = {
 // 官方站点的共享推送额度已停用；但自部署用户用的是自己的 Supabase，
 // 没有理由连自己也不能用。此前写死 true，导致自部署站点上回传箱不可读——
 // 服务端生成的主动消息写进 push_outbox 后，客户端永远取不走。
-const SHARED_PUSH_DISABLED = process.env.NEXT_PUBLIC_SELF_HOSTED_MODE !== "true";
+const SHARED_PUSH_DISABLED = !isSelfHostedModeEnabled();
 
 function sharedPushDisabledResponse() {
   return NextResponse.json({ ok: false, error: "本站共享离线推送回传已停用。" }, { status: 503 });

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
+
 import { cleanAccountText, getCurrentAccount } from "@/lib/server/account-auth";
 import { encryptPushJobPayload } from "@/lib/server/push-job-crypto";
 import { getOrCreatePushPayloadKey } from "@/lib/server/push-service";
@@ -10,7 +12,7 @@ const ALLOWED_KINDS = new Set(["followup", "reply_bailout", "timed_task", "short
 // 官方站点的共享推送额度已停用；但自部署用户用的是自己的 Supabase，
 // 没有理由连自己也不能用。此前写死 true，导致自部署站点上「创建离线任务」
 // 必然返回 503、任务永远进不了 push_jobs，主动消息功能整体失效。
-const SHARED_PUSH_DISABLED = process.env.NEXT_PUBLIC_SELF_HOSTED_MODE !== "true";
+const SHARED_PUSH_DISABLED = !isSelfHostedModeEnabled();
 
 function sharedPushDisabledResponse() {
   return NextResponse.json({ ok: false, error: "本站共享离线推送已停用，请部署个人 Supabase。" }, { status: 503 });

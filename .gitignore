@@ -30,3 +30,5 @@ tools/weixin-local-assistant/config.txt
 /public/models/world-builder/
 
 .netlify/
+.vercel
+.env*
