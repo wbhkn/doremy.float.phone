@@ -464,10 +464,17 @@ function anthropicContentFromParts(content: string | LLMContentPart[]): unknown[
     });
 }
 
-function geminiContentFromParts(content: string | LLMContentPart[]): unknown[] {
+function geminiContentFromParts(
+    content: string | LLMContentPart[],
+    allowInlineData = true,
+): unknown[] {
     if (typeof content === "string") return content ? [{ text: content }] : [];
     return content.flatMap<unknown>((part) => {
         if (part.type === "text") return part.text ? [{ text: part.text }] : [];
+        // Gemini / 多数中转只允许「当前这一轮」带内联图片，历史里的 inlineData 会被
+        // 直接判 400（contents[N].parts[M].inlineData is not supported in text history），
+        // 所以历史轮的图片降级成文本占位，保留语义但不重发图片。
+        if (!allowInlineData) return [{ text: "[图片]" }];
         const parsed = parseDataUrl(part.image_url.url);
         if (!parsed) return [{ text: "[image omitted: unsupported image URL]" }];
         return [{
@@ -687,17 +694,18 @@ function buildGeminiRequest(
 
 function compactGeminiContents(messages: LlmRequestMessage[]): Array<{ role: "user" | "model" | "tool"; parts: unknown[] }> {
     const compacted: Array<{ role: "user" | "model" | "tool"; parts: unknown[] }> = [];
-    for (const message of messages) {
+    const lastIndex = messages.length - 1;
+    messages.forEach((message, index) => {
         const role = message.role === "assistant" ? "model" : message.role === "tool" ? "tool" : "user";
-        const parts = geminiParts(message);
+        const parts = geminiParts(message, index === lastIndex);
         const last = compacted[compacted.length - 1];
         if (last && last.role === role) last.parts.push(...parts);
         else compacted.push({ role, parts });
-    }
+    });
     return compacted;
 }
 
-function geminiParts(message: LlmRequestMessage): unknown[] {
+function geminiParts(message: LlmRequestMessage, allowInlineData = true): unknown[] {
     if (message.role === "tool") {
         return [{
             functionResponse: {
@@ -728,7 +736,7 @@ function geminiParts(message: LlmRequestMessage): unknown[] {
             }),
         ];
     }
-    return geminiContentFromParts(message.content);
+    return geminiContentFromParts(message.content, allowInlineData);
 }
 
 function parseOpenAICompatibleResponse(data: unknown): LlmParsedResponse {

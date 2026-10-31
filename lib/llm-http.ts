@@ -231,6 +231,33 @@ function degradeAllRemoteImages(body: unknown): boolean {
     return changed;
 }
 
+/** 上一次 400 明确说 inlineData 不能出现在历史里时，把所有内联图片降级成文本重试一次。 */
+function degradeAllInlineData(body: unknown): boolean {
+    if (!isRecord(body)) return false;
+    const contents = body.contents;
+    if (!Array.isArray(contents)) return false;
+
+    let changed = false;
+    contents.forEach((content) => {
+        if (!isRecord(content) || !Array.isArray(content.parts)) return;
+        const parts = content.parts as unknown[];
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const part = parts[i];
+            if (!isRecord(part)) continue;
+            if (isRecord(part.inlineData) || isRecord(part.inline_data)) {
+                parts[i] = { text: "[图片]" };
+                changed = true;
+            }
+        }
+    });
+    return changed;
+}
+
+function responseMentionsInlineDataRejection(status: number, errorText: string): boolean {
+    if (status !== 400 && status !== 422) return false;
+    return /inline_?data/i.test(errorText) && /(not supported|invalid|unsupported|not allowed)/i.test(errorText);
+}
+
 function responseMentionsImageDownloadError(status: number, errorText: string): boolean {
     if (status !== 400 && status !== 422) return false;
     return IMAGE_URL_IN_ERROR_RE.test(errorText) || IMAGE_DOWNLOAD_ERROR_RE.test(errorText);
@@ -274,6 +301,18 @@ export async function fetchLlmPayload(
     // 去掉这些图片重试一次——「这一轮少送一张图」远好过「整条会话发不出消息」。
     let errorText = "";
     try { errorText = await response.clone().text(); } catch { errorText = ""; }
+
+    // 中转/新版 Gemini 会拒收历史里的 inlineData：把所有内联图降级成 [图片] 再试一次。
+    if (responseMentionsInlineDataRejection(response.status, errorText)) {
+        const next = body ?? (isRecord(payload.body) ? { ...(payload.body as Record<string, unknown>) } : null);
+        if (next && degradeAllInlineData(next)) {
+            const retried = await sendOnce(payload, JSON.stringify(next), options.signal);
+            if (retried.ok) return retried;
+            try { errorText = await retried.clone().text(); } catch { errorText = ""; }
+            return retried;
+        }
+    }
+
     if (!body || !responseMentionsImageDownloadError(response.status, errorText)) return response;
     if (!degradeAllRemoteImages(body)) return response;
 
