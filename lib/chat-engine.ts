@@ -417,6 +417,20 @@ function mergeAppTags(base: string[] | undefined, extra: string[] | undefined, f
     return Array.from(tags);
 }
 
+/**
+ * 模型有时不真的调用「分享」动作，而是在正文里写一行「[分享视频]」占位。
+ * 那种占位没有任何信息量，留给用户只会变成一条死文本，这里直接抹掉。
+ */
+export function stripSharePlaceholders(text: string): string {
+    if (!text) return text;
+    const cleaned = text.replace(/[\[【（(]\s*(?:分享视频|分享的视频|视频卡片|分享卡片)\s*[\]】）)]/g, "");
+    if (cleaned === text) return text;
+    return cleaned
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
 /** 从输出正文中剥离思维链标签块（仅标签解析开启时用于清洗展示文本）。 */
 export function stripOnlineThinkingTag(rawOutput: string, tag: string): string {
     if (!tag.trim()) return rawOutput;
@@ -2295,7 +2309,7 @@ async function generateNativeChatCompletion(
             displayContent = stripOnlineThinkingTag(displayContent, onlineThinkingTag);
         }
         // 剔除预设配置的文本片段（<思考结束> 等残留标签）
-        displayContent = stripPresetTexts(displayContent, preset);
+        displayContent = stripSharePlaceholders(stripPresetTexts(displayContent, preset));
 
         const { cleanText: afterActionStrip, actions } = parseActionTags(displayContent);
         if (actions.length > 0) {
@@ -2456,9 +2470,11 @@ async function generateNativeChatCompletion(
             nativeBundle = buildNativeChatTools(enabledTools, expandedSourceIds, nativeToolBuildOptions);
         }
 
-        const notices = outcomes.map(item => (
-            item.result.userNotice || (item.result.success ? `✓ ${item.result.name} 执行成功` : `✗ ${item.result.name}: ${item.result.error}`)
-        )).filter(Boolean).join("；");
+        const notices = outcomes
+            .filter(item => !item.result.silent)
+            .map(item => (
+                item.result.userNotice || (item.result.success ? `✓ ${item.result.name} 执行成功` : `✗ ${item.result.name}: ${item.result.error}`)
+            )).filter(Boolean).join("；");
         throwIfAborted(options?.signal);
         if (notices) callbacks?.onToolNotice?.(notices);
 
@@ -2866,7 +2882,9 @@ async function generateChatCompletionCore(
                 });
                 throwIfAborted(options?.signal);
                 // 同一轮里可能并行调用多次：去重 + 限量，避免聊天里堆出一整屏「刷B站…」
-                const notices = results.map(r => r.userNotice || (r.success ? `✓ ${r.name} 执行成功` : `✗ ${r.name}: ${r.error}`));
+                // silent 的结果（例如防重复调用的提示）只给模型看，不进聊天。
+                const visibleResults = results.filter(r => !r.silent);
+                const notices = visibleResults.map(r => r.userNotice || (r.success ? `✓ ${r.name} 执行成功` : `✗ ${r.name}: ${r.error}`));
                 const dedupedNotices = Array.from(new Set(notices)).slice(0, 3);
                 const resultNotices = dedupedNotices.join("；");
                 if (resultNotices) callbacks?.onToolNotice?.(resultNotices);

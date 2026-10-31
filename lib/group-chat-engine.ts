@@ -35,6 +35,7 @@ import {
     applyCustomPromptProfileToPreset,
     stripOnlineThinkingTag,
     stripPresetTexts,
+    stripSharePlaceholders,
     type ChatCompletionCallbacks,
     type NativeChatToolBundle,
 } from "./chat-engine";
@@ -629,7 +630,7 @@ async function runNativeGroupToolLoop(params: {
             displayContent = stripOnlineThinkingTag(displayContent, onlineThinkingTag);
         }
         // 剔除预设配置的文本片段（<思考结束> 等残留标签）
-        displayContent = stripPresetTexts(displayContent, preset);
+        displayContent = stripSharePlaceholders(stripPresetTexts(displayContent, preset));
         const assistantForToolContext = stripStateAndInnerForPrompt(displayContent);
         if (result.toolCalls.length === 0) {
             throwIfAborted(signal);

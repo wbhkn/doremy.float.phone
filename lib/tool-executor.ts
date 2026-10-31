@@ -158,6 +158,8 @@ export type ToolResult = {
     continueConversation?: boolean;
     persistToHistory?: boolean;
     userNotice?: string;
+    /** 只给模型看、不显示在聊天里的结果（例如防重复调用的提示）。 */
+    silent?: boolean;
     pendingApproval?: boolean;
     pendingRequest?: MemoryWriteRequest;
     mediaAttachments?: MediaAttachment[];
@@ -2624,12 +2626,14 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
         userNotice,
     });
     // 挡重复动作时不能直接终止对话：模型得看到这条提示，再用文字把结果讲出来。
+    // silent: 这类提示只该出现在模型上下文里，不该在聊天里刷出一屏「✗ 刷B站: 这个动作…」。
     const nudge = (error: string): ToolResult => ({
         name: call.name,
         success: false,
         error,
         continueConversation: true,
         persistToHistory: false,
+        silent: true,
     });
 
     const capability = getInternalCapability(BILIBILI_BROWSE_CAPABILITY_ID);
@@ -2690,11 +2694,15 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
     ].join("|");
     if (recent.some(item => item.key === fingerprint)) {
         biliCallWindow.set(sessionKey, recent);
-        return nudge(`这个动作你刚刚已经做过了，结果就在上一条里；不要重复调用同一个动作，现在直接用文字把你看到的说给{{user}}听。`);
+        return nudge(
+            "这个动作你刚刚已经做过了，结果就在上一条里。不要再重复调用同一个动作，现在直接用文字把你看到的东西说给用户听（可以说说你看到了什么、哪里有意思），不要只写占位文字。",
+        );
     }
     if (recent.length >= BILI_CALL_BUDGET) {
         biliCallWindow.set(sessionKey, recent);
-        return nudge(`这一轮已经刷了 ${BILI_CALL_BUDGET} 次 B 站，够了；停下来，用文字跟{{user}}聊你看到的东西。`);
+        return nudge(
+            `这一轮已经刷了 ${BILI_CALL_BUDGET} 次 B 站，够了。停下来，用文字跟用户聊你看到的东西；如果想让对方也看到某条视频，就调用 action=share 分享那一条。`,
+        );
     }
     recent.push({ key: fingerprint, at: now });
     biliCallWindow.set(sessionKey, recent);
