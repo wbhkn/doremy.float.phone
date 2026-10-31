@@ -2865,8 +2865,11 @@ async function generateChatCompletionCore(
                     } : undefined,
                 });
                 throwIfAborted(options?.signal);
-                const resultNotices = results.map(r => r.userNotice || (r.success ? `✓ ${r.name} 执行成功` : `✗ ${r.name}: ${r.error}`)).join("；");
-                callbacks?.onToolNotice?.(resultNotices);
+                // 同一轮里可能并行调用多次：去重 + 限量，避免聊天里堆出一整屏「刷B站…」
+                const notices = results.map(r => r.userNotice || (r.success ? `✓ ${r.name} 执行成功` : `✗ ${r.name}: ${r.error}`));
+                const dedupedNotices = Array.from(new Set(notices)).slice(0, 3);
+                const resultNotices = dedupedNotices.join("；");
+                if (resultNotices) callbacks?.onToolNotice?.(resultNotices);
             } catch (err) {
                 throwIfAborted(options?.signal);
                 const errMsg = `⚠️ 动作执行失败: ${err instanceof Error ? err.message : String(err)}`;
@@ -2877,7 +2880,11 @@ async function generateChatCompletionCore(
 
             const resultsForHistory = results.filter(r => r.persistToHistory !== false);
             const resultsForContinuation = results.filter(r => r.continueConversation !== false);
-            const toolResultContent = resultsForHistory.length > 0 ? formatToolResults(resultsForHistory) : "";
+            // 结果必须回喂给模型：persistToHistory=false 只表示「不写进长期历史」，
+            // 不代表模型这一轮不该看到结果。以前两者混用，导致「刷B站」这类工具
+            // 的结果永远进不了模型上下文 → 模型看不见结果、不停重试同一个动作。
+            const resultsForModel = resultsForContinuation.length > 0 ? resultsForContinuation : resultsForHistory;
+            const toolResultContent = resultsForModel.length > 0 ? formatToolResults(resultsForModel) : "";
             throwIfAborted(options?.signal);
             const toolExecutionId = createToolExecutionId();
             callbacks?.onToolExecution?.(results, toolResultContent || undefined, { toolExecutionId });

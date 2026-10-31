@@ -996,7 +996,10 @@ export async function generateGroupChatCompletion(
 
             const resultsForHistory = results.filter(r => r.persistToHistory !== false);
             const resultsForContinuation = results.filter(r => r.continueConversation !== false);
-            const toolResultContent = resultsForHistory.length > 0 ? formatToolResults(resultsForHistory) : "";
+            // 与私聊一致：persistToHistory=false 只是不写进长期历史，结果仍要回喂模型，
+            // 否则模型看不到工具结果会反复重试同一个动作。
+            const resultsForModel = resultsForContinuation.length > 0 ? resultsForContinuation : resultsForHistory;
+            const toolResultContent = resultsForModel.length > 0 ? formatToolResults(resultsForModel) : "";
             throwIfAborted(options?.signal);
             const toolExecutionId = createToolExecutionId();
             callbacks?.onToolExecution?.(results, toolResultContent || undefined, { toolExecutionId });

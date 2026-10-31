@@ -2600,6 +2600,14 @@ function dispatchCalendarUpdated(): void {
 // ── 刷B站（角色自己上哔哩哔哩看视频）───────────────
 
 /**
+ * 同一轮里短时间内的 B 站动作记录，用来挡「模型卡在一个动作上反复刷」。
+ * 键是 sessionId，值是最近两分钟内的动作指纹。
+ */
+const biliCallWindow = new Map<string, { key: string; at: number }[]>();
+const BILI_CALL_DEDUPE_MS = 120_000;
+const BILI_CALL_BUDGET = 6;
+
+/**
  * 角色「刷B站」：只读浏览公开数据。
  *
  * 为什么走 /api/bili 而不是直连：api.bilibili.com 不返回 CORS 头，
@@ -2614,6 +2622,14 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
         continueConversation: false,
         persistToHistory: false,
         userNotice,
+    });
+    // 挡重复动作时不能直接终止对话：模型得看到这条提示，再用文字把结果讲出来。
+    const nudge = (error: string): ToolResult => ({
+        name: call.name,
+        success: false,
+        error,
+        continueConversation: true,
+        persistToHistory: false,
     });
 
     const capability = getInternalCapability(BILIBILI_BROWSE_CAPABILITY_ID);
@@ -2640,6 +2656,31 @@ async function executeBilibiliTool(call: ToolCall, context?: ToolExecutionContex
     if (bvid && !/^BV[0-9A-Za-z]{10}$/.test(bvid)) {
         bvid = await resolveBiliBvid(bvid);
     }
+
+    // 模型有时会卡在同一个动作上反复调用（尤其是 feed/video），
+    // 这里对同一会话两分钟内的重复动作直接拦掉，并让它把结果说出来。
+    const sessionKey = String(context?.sessionId || "anonymous");
+    const now = Date.now();
+    const recent = (biliCallWindow.get(sessionKey) || []).filter(item => now - item.at < BILI_CALL_DEDUPE_MS);
+    const fingerprint = [
+        action,
+        bvid,
+        String(args.keyword ?? ""),
+        String(args.mid ?? ""),
+        String(args.rid ?? ""),
+        String(args.ps ?? ""),
+        String(args.fresh_idx ?? ""),
+    ].join("|");
+    if (recent.some(item => item.key === fingerprint)) {
+        biliCallWindow.set(sessionKey, recent);
+        return nudge(`这个动作你刚刚已经做过了，结果就在上一条里；不要重复调用同一个动作，现在直接用文字把你看到的说给{{user}}听。`);
+    }
+    if (recent.length >= BILI_CALL_BUDGET) {
+        biliCallWindow.set(sessionKey, recent);
+        return nudge(`这一轮已经刷了 ${BILI_CALL_BUDGET} 次 B 站，够了；停下来，用文字跟{{user}}聊你看到的东西。`);
+    }
+    recent.push({ key: fingerprint, at: now });
+    biliCallWindow.set(sessionKey, recent);
 
     if (action === "feed") {
         if (Number(args.ps)) params.ps = Math.min(Math.max(Number(args.ps), 1), 20);
