@@ -29,6 +29,7 @@ import {
     IDLE_RECONNECT_MAX_CONSECUTIVE,
     loadIdleReconnectRules,
     removeIdleReconnectRule,
+    upsertIdleReconnectRule,
     type IdleReconnectRule,
 } from "./idle-reconnect-storage";
 import { loadCharacters } from "./character-storage";
@@ -481,7 +482,18 @@ export async function armIdleReconnectBailout(rule: IdleReconnectRule): Promise<
     if (!bailoutEnabled()) return { ok: false, reason: "当前环境不支持服务端离线预约" };
     try {
         if (!(await hasAccountPushSubscription())) return { ok: false, reason: "当前账号没有可用的离线推送订阅" };
-        const session = loadChatSessions().find(s => s.id === rule.sessionId);
+        let session = loadChatSessions().find(s => s.id === rule.sessionId);
+        // 规则里的 sessionId 可能已经失效（清过数据、换过账号、角色重开过会话）：
+        // 冷场重连的本质是「这个角色多久没说话」，会话 id 只是指针。按角色 id 找回
+        // 同角色的单聊会话并就地改掉规则，比整条规则作废合理——否则用户会看到
+        // 「冷场重连规则 1 条未挂上：找不到对应的单聊会话」，却不知道该删哪条规则。
+        if (!session && rule.characterId) {
+            const repaired = loadChatSessions().find(s => !s.isGroup && s.contactId === rule.characterId);
+            if (repaired) {
+                session = repaired;
+                upsertIdleReconnectRule({ ...rule, sessionId: repaired.id });
+            }
+        }
         if (!session || session.isGroup || session.contactId !== rule.characterId) return { ok: false, reason: "找不到对应的单聊会话" };
         // 正在通话中：不挂冷场重连。通话期间系统看不到文字回复，会误判成用户
         // 沉默了、按规则发来主动消息，只在通知里冒出来（用户实报）。
@@ -575,7 +587,9 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
     try {
         if (!(await hasAccountPushSubscription())) return { ok: false, reason: "当前账号没有可用的离线推送订阅" };
         if (isWithinPushQuietHours(schedule.fireAt)) return { ok: false, reason: "触发时间落在推送安静时段内" };
-        const session = loadChatSessions().find(s => s.id === schedule.sessionId);
+        // 同冷场重连：排期里的 sessionId 也可能失效，按角色 id 找回同角色单聊会话。
+        const session = loadChatSessions().find(s => s.id === schedule.sessionId)
+            || loadChatSessions().find(s => !s.isGroup && s.contactId === schedule.characterId);
         if (!session || session.isGroup || session.contactId !== schedule.characterId) return { ok: false, reason: "找不到对应的单聊会话" };
         const history = loadChatMessages(session.id);
         const elapsedMinutes = resolveTimedWakeElapsedMinutes(schedule, history);
